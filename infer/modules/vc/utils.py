@@ -18,6 +18,7 @@ def get_index_path_from_model(sid):
         "",
     )
 
+
 def load_hubert(config):
     import torch
     from fairseq import checkpoint_utils
@@ -45,6 +46,7 @@ def load_hubert(config):
     hubert_model = models[0].to(config.device)
     hubert_model = hubert_model.half() if config.is_half else hubert_model.float()
     return hubert_model.eval()
+
 
 def load_hubert_old(config):
     models, _, _ = checkpoint_utils.load_model_ensemble_and_task(

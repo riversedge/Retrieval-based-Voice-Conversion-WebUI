@@ -9,6 +9,7 @@ from infer.modules.vc.modules import VC
 from infer.modules.uvr5.modules import uvr
 from infer.lib.train.process_ckpt import (
     change_info,
+    export_model,
     extract_small_model,
     merge,
     show_info,
@@ -1576,6 +1577,42 @@ with gr.Blocks(title="RVC WebUI") as app:
                     [ckpt_path2, save_name, sr__, if_f0__, info___, version_1],
                     info7,
                     api_name="ckpt_extract",
+                )
+            with gr.Group():
+                gr.Markdown(value=i18n("导出模型到weights/"))
+                with gr.Row():
+                    export_ckpt_path = gr.Textbox(
+                        label=i18n("模型路径"), value="", interactive=True
+                    )
+                    export_name = gr.Textbox(
+                        label=i18n("导出文件名(不含后缀)"), value="", interactive=True
+                    )
+                    export_format = gr.Radio(
+                        label=i18n("导出格式"),
+                        choices=["WebUI format", "RVC-CLI format (with config)"],
+                        value="WebUI format",
+                        interactive=True,
+                    )
+                with gr.Row():
+                    export_strip_opt = gr.Checkbox(
+                        label=i18n("移除优化器状态"), value=True
+                    )
+                    export_copy_index = gr.Checkbox(
+                        label=i18n("复制索引文件(.index)"), value=True
+                    )
+                    export_button = gr.Button(i18n("导出"), variant="primary")
+                    export_info = gr.Textbox(label=i18n("输出信息"), value="", max_lines=8)
+                export_button.click(
+                    export_model,
+                    [
+                        export_ckpt_path,
+                        export_name,
+                        export_format,
+                        export_strip_opt,
+                        export_copy_index,
+                    ],
+                    export_info,
+                    api_name="ckpt_export",
                 )
 
         with gr.TabItem(i18n("Onnx导出")):

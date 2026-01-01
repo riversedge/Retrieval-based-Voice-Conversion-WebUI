@@ -1,11 +1,12 @@
 import os
 import sys
 import traceback
+
 import torch
 from fairseq.data.dictionary import Dictionary
 
-os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
-os.environ["PYTORCH_MPS_HIGH_WATERMARK_RATIO"] = "0.0"
+from infer.lib.device import get_device
+from infer.lib.torch_load_compat import torch_load_compat
 
 device = sys.argv[1]
 n_part = int(sys.argv[2])
@@ -27,15 +28,13 @@ import torch
 import torch.nn.functional as F
 
 if "privateuseone" not in device:
-    device = "cpu"
-    if torch.cuda.is_available():
-        device = "cuda"
-    elif torch.backends.mps.is_available():
-        device = "mps"
+    device = get_device(device)
+    device_type = device.type
 else:
     import torch_directml
 
     device = torch_directml.device(torch_directml.default_device())
+    device_type = "privateuseone"
 
     def forward_dml(ctx, x, scale):
         ctx.scale = scale
@@ -55,6 +54,9 @@ def printt(strr):
 
 printt(" ".join(sys.argv))
 model_path = "assets/hubert/hubert_base.pt"
+mps_fallback_enabled = os.getenv("PYTORCH_ENABLE_MPS_FALLBACK", "0") == "1"
+printt(f"Using device: {device}")
+printt(f"MPS fallback enabled: {mps_fallback_enabled}")
 
 printt("exp_dir: " + exp_dir)
 wavPath = "%s/1_16k_wavs" % exp_dir
@@ -98,9 +100,13 @@ except Exception:
 
 # Force weights_only=False for fairseq checkpoint loading (local to this process)
 _original_torch_load = torch.load
+
+
 def _torch_load_compat(*args, **kwargs):
-    kwargs.setdefault("weights_only", False)
-    return _original_torch_load(*args, **kwargs)
+    kwargs.setdefault("weights_only_default", False)
+    return torch_load_compat(*args, **kwargs)
+
+
 torch.load = _torch_load_compat
 # ----------------------------------------------------------------
 
@@ -112,7 +118,7 @@ model = models[0]
 model = model.to(device)
 printt("move model to %s" % device)
 if is_half:
-    if device not in ["mps", "cpu"]:
+    if device_type not in ["mps", "cpu"]:
         model = model.half()
 model.eval()
 
@@ -136,7 +142,7 @@ else:
                 inputs = {
                     "source": (
                         feats.half().to(device)
-                        if is_half and device not in ["mps", "cpu"]
+                        if is_half and device_type not in ["mps", "cpu"]
                         else feats.to(device)
                     ),
                     "padding_mask": padding_mask.to(device),

@@ -2,10 +2,12 @@ import math
 import random
 from typing import Optional, Tuple
 from fairseq.checkpoint_utils import load_model_ensemble_and_task
+from fairseq.data.dictionary import Dictionary
 import numpy as np
 import torch
 import torch.nn.functional as F
 
+from infer.lib.torch_load_compat import torch_load_compat
 # from fairseq.data.data_utils import compute_mask_indices
 from fairseq.utils import index_put
 
@@ -266,10 +268,24 @@ def apply_mask(self, x, padding_mask, target_list):
 def get_hubert_model(
     model_path="assets/hubert/hubert_base.pt", device=torch.device("cpu")
 ):
-    models, _, _ = load_model_ensemble_and_task(
-        [model_path],
-        suffix="",
-    )
+    try:
+        torch.serialization.add_safe_globals([Dictionary])
+    except Exception:
+        pass
+    original_torch_load = torch.load
+
+    def _torch_load(*args, **kwargs):
+        kwargs.setdefault("weights_only_default", False)
+        return torch_load_compat(*args, **kwargs)
+
+    torch.load = _torch_load
+    try:
+        models, _, _ = load_model_ensemble_and_task(
+            [model_path],
+            suffix="",
+        )
+    finally:
+        torch.load = original_torch_load
     hubert_model = models[0]
     hubert_model = hubert_model.to(device)
 

@@ -5,6 +5,8 @@ import numpy as np
 import torch
 
 from infer.lib import jit
+from infer.lib.device import get_device
+from infer.lib.torch_load_compat import torch_load_compat
 
 try:
     # Fix "Torch not compiled with CUDA enabled"
@@ -498,7 +500,7 @@ class RMVPE:
         self.resample_kernel = {}
         self.is_half = is_half
         if device is None:
-            device = "cuda:0" if torch.cuda.is_available() else "cpu"
+            device = get_device()
         self.device = device
         self.mel_extractor = MelSpectrogram(
             is_half, 128, 16000, 1024, 160, None, 30, 8000
@@ -541,7 +543,7 @@ class RMVPE:
 
             def get_default_model():
                 model = E2E(4, 1, (2, 2))
-                ckpt = torch.load(model_path, map_location="cpu")
+                ckpt = torch_load_compat(model_path, map_location="cpu")
                 model.load_state_dict(ckpt)
                 model.eval()
                 if is_half:
@@ -562,7 +564,7 @@ class RMVPE:
             else:
                 self.model = get_default_model()
 
-            self.model = self.model.to(device)
+        self.model = self.model.to(device)
         cents_mapping = 20 * np.arange(360) + 1997.3794084376191
         self.cents_mapping = np.pad(cents_mapping, (4, 4))  # 368
 
@@ -658,7 +660,7 @@ if __name__ == "__main__":
         audio = librosa.resample(audio, orig_sr=sampling_rate, target_sr=16000)
     model_path = r"D:\BaiduNetdiskDownload\RVC-beta-v2-0727AMD_realtime\rmvpe.pt"
     thred = 0.03  # 0.01
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = get_device()
     rmvpe = RMVPE(model_path, is_half=False, device=device)
     t0 = ttime()
     f0 = rmvpe.infer_from_audio(audio, thred=thred)

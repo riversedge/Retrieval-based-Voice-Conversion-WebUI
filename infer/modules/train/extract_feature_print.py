@@ -1,6 +1,8 @@
 import os
 import sys
 import traceback
+import torch
+from fairseq.data.dictionary import Dictionary
 
 os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 os.environ["PYTORCH_MPS_HIGH_WATERMARK_RATIO"] = "0.0"
@@ -86,6 +88,22 @@ if os.access(model_path, os.F_OK) == False:
         % model_path
     )
     exit(0)
+# ---- PyTorch >=2.6 + fairseq HuBERT checkpoint compatibility ----
+# Allow fairseq Dictionary to be unpickled in safe mode
+try:
+    torch.serialization.add_safe_globals([Dictionary])
+except Exception:
+    # Older torch versions may not have add_safe_globals; ignore
+    pass
+
+# Force weights_only=False for fairseq checkpoint loading (local to this process)
+_original_torch_load = torch.load
+def _torch_load_compat(*args, **kwargs):
+    kwargs.setdefault("weights_only", False)
+    return _original_torch_load(*args, **kwargs)
+torch.load = _torch_load_compat
+# ----------------------------------------------------------------
+
 models, saved_cfg, task = fairseq.checkpoint_utils.load_model_ensemble_and_task(
     [model_path],
     suffix="",

@@ -488,9 +488,13 @@ def click_train(
         if version19 == "v1"
         else "%s/3_feature768" % (exp_dir)
     )
+    if not os.path.exists(feature_dir):
+        return "请先进行特征提取!"
     if if_f0_3:
         f0_dir = "%s/2a_f0" % (exp_dir)
         f0nsf_dir = "%s/2b-f0nsf" % (exp_dir)
+        if not os.path.exists(f0_dir) or not os.path.exists(f0nsf_dir):
+            return "请先进行特征提取!"
         names = (
             set([name.split(".")[0] for name in os.listdir(gt_wavs_dir)])
             & set([name.split(".")[0] for name in os.listdir(feature_dir)])

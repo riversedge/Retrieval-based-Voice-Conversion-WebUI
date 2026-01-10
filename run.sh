@@ -15,39 +15,39 @@ elif [ "$(uname)" != "Linux" ]; then
   exit 1
 fi
 
-if [ -d ".venv" ]; then
+if [ -d "$HOME/.venv" ]; then
   echo "Activate venv..."
-  . .venv/bin/activate
+  . ~/.venv/bin/activate
 else
   echo "Create venv..."
   requirements_file="requirements.txt"
 
   # Check if Python 3.13 is installed
-  if ! command -v ~/.venv/bin/python >/dev/null 2>&1 || pyenv versions --bare | grep -q "3.13"; then
+  if ! command -v python >/dev/null 2>&1 || ! python -V 2>&1 | grep -q "3.13"; then
     echo "Python 3 not found. Attempting to install 3.13..."
     if [ "$(uname)" = "Darwin" ] && command -v brew >/dev/null 2>&1; then
       brew install python@3.13
     elif [ "$(uname)" = "Linux" ] && command -v apt-get >/dev/null 2>&1; then
       sudo apt-get update
-      sudo apt-get install ~/.venv/bin/python
+      sudo apt-get install python3.13
     else
       echo "Please install Python 3.13 manually."
       exit 1
     fi
   fi
 
-  ~/.venv/bin/python -m venv .venv
-  . .venv/bin/activate
+  python -m venv ~/.venv
+  . ~/.venv/bin/activate
 
   # Check if required packages are installed and install them if not
   if [ -f "${requirements_file}" ]; then
-    installed_packages=$(~/.venv/bin/python -m pip freeze)
+    installed_packages=$(python -m pip freeze)
     while IFS= read -r package; do
       expr "${package}" : "^#.*" > /dev/null && continue
       package_name=$(echo "${package}" | sed 's/[<>=!].*//')
       if ! echo "${installed_packages}" | grep -q "${package_name}"; then
         echo "${package_name} not found. Attempting to install..."
-        ~/.venv/bin/python -m pip install --upgrade "${package}"
+        python -m pip install --upgrade "${package}"
       fi
     done < "${requirements_file}"
   else
@@ -65,4 +65,4 @@ if [ $? -ne 0 ]; then
 fi
 
 # Run the main script
-~/.venv/bin/python infer-web.py --pycmd ~/.venv/bin/python
+python infer-web.py --pycmd python

@@ -1,6 +1,7 @@
 import os
 import sys
 import logging
+import traceback
 from contextlib import nullcontext
 
 logger = logging.getLogger(__name__)
@@ -80,6 +81,39 @@ from infer.lib.train.process_ckpt import savee, build_model_config
 
 global_step = 0
 
+# --- PAD TRACER (debug) ---
+_PAD_TRACER_ENABLED = os.environ.get("RVC_PAD_TRACE", "0") == "1"
+_PAD_TRACER_FIRED = False
+_orig_pad = F.pad
+
+
+def _pad_tracer(x, pad, mode="constant", value=0):
+    global _PAD_TRACER_FIRED
+    try:
+        if (
+            _PAD_TRACER_ENABLED
+            and not _PAD_TRACER_FIRED
+            and hasattr(x, "is_mps")
+            and x.is_mps
+            and getattr(x, "dim", lambda: 0)() > 3
+            and mode == "constant"
+        ):
+            _PAD_TRACER_FIRED = True
+            print("\n=== RVC_PAD_TRACE HIT ===")
+            print(f"shape={tuple(x.shape)} dtype={x.dtype} device={x.device}")
+            print(f"pad={pad} mode={mode} value={value}")
+            print("traceback (most recent call last):")
+            print("".join(traceback.format_stack(limit=20)))
+            print("=== END RVC_PAD_TRACE ===\n")
+    except Exception as exc:
+        print(f"[RVC_PAD_TRACE] tracer error: {exc}")
+    return _orig_pad(x, pad, mode, value)
+
+
+if _PAD_TRACER_ENABLED:
+    F.pad = _pad_tracer
+# --- END PAD TRACER ---
+
 
 class NullScaler:
     def scale(self, loss):
@@ -127,7 +161,6 @@ class EpochRecorder:
 
 def main():
     device = get_device()
-    _install_mps_pad_debug()
     ddp_enabled = _env_flag("RVC_DDP", device.type == "cuda")
     if device.type != "cuda":
         ddp_enabled = _env_flag("RVC_DDP", False)
@@ -157,46 +190,6 @@ def main():
 
     for i in range(n_gpus):
         children[i].join()
-
-
-def _install_mps_pad_debug():
-    if not _env_flag("RVC_MPS_PAD_DEBUG", False):
-        return
-    if getattr(torch.nn.functional.pad, "_rvc_mps_pad_debug", False):
-        return
-
-    seen_callsites = set()
-    original_pad = torch.nn.functional.pad
-
-    def _pad_with_debug(x, pad, mode="constant", value=None):
-        if (
-            getattr(x, "is_mps", False)
-            and x.is_mps
-            and x.dim() > 3
-            and mode == "constant"
-        ):
-            import traceback
-
-            stack = traceback.format_stack(limit=12)
-            callsite = stack[-2] if len(stack) >= 2 else stack[-1]
-            key = callsite
-            if key not in seen_callsites:
-                seen_callsites.add(key)
-                print(
-                    "MPS pad constant warning: input=%s dtype=%s device=%s"
-                    % (tuple(x.shape), x.dtype, x.device)
-                )
-                print(
-                    "MPS pad constant warning: pad=%s value=%s" % (pad, value)
-                )
-                print(
-                    "MPS pad constant warning: traceback:\n%s"
-                    % "".join(stack)
-                )
-        return original_pad(x, pad, mode=mode, value=value)
-
-    _pad_with_debug._rvc_mps_pad_debug = True
-    torch.nn.functional.pad = _pad_with_debug
 
 
 def run(rank, n_gpus, hps, logger: logging.Logger, ddp_enabled, device):

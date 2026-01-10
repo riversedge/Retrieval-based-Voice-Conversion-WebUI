@@ -10,9 +10,6 @@ if [ "$(uname)" = "Darwin" ]; then
   export RVC_TB_IMAGES=0
   export PYTORCH_ENABLE_MPS_FALLBACK=1
   export PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0
-elif [ "$(uname)" != "Linux" ]; then
-  echo "Unsupported operating system."
-  exit 1
 fi
 
 if [ -d "$HOME/.venv" ]; then

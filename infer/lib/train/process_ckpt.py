@@ -2,12 +2,37 @@ import os
 import sys
 import traceback
 from collections import OrderedDict
+import shutil
 
 import torch
 
 from i18n.i18n import I18nAuto
+from infer.lib.torch_load_compat import torch_load_compat
 
 i18n = I18nAuto()
+
+
+def build_model_config(hps):
+    return [
+        hps.data.filter_length // 2 + 1,
+        32,
+        hps.model.inter_channels,
+        hps.model.hidden_channels,
+        hps.model.filter_channels,
+        hps.model.n_heads,
+        hps.model.n_layers,
+        hps.model.kernel_size,
+        hps.model.p_dropout,
+        hps.model.resblock,
+        hps.model.resblock_kernel_sizes,
+        hps.model.resblock_dilation_sizes,
+        hps.model.upsample_rates,
+        hps.model.upsample_initial_channel,
+        hps.model.upsample_kernel_sizes,
+        hps.model.spk_embed_dim,
+        hps.model.gin_channels,
+        hps.data.sampling_rate,
+    ]
 
 
 def savee(ckpt, sr, if_f0, name, epoch, version, hps):
@@ -18,26 +43,7 @@ def savee(ckpt, sr, if_f0, name, epoch, version, hps):
             if "enc_q" in key:
                 continue
             opt["weight"][key] = ckpt[key].half()
-        opt["config"] = [
-            hps.data.filter_length // 2 + 1,
-            32,
-            hps.model.inter_channels,
-            hps.model.hidden_channels,
-            hps.model.filter_channels,
-            hps.model.n_heads,
-            hps.model.n_layers,
-            hps.model.kernel_size,
-            hps.model.p_dropout,
-            hps.model.resblock,
-            hps.model.resblock_kernel_sizes,
-            hps.model.resblock_dilation_sizes,
-            hps.model.upsample_rates,
-            hps.model.upsample_initial_channel,
-            hps.model.upsample_kernel_sizes,
-            hps.model.spk_embed_dim,
-            hps.model.gin_channels,
-            hps.data.sampling_rate,
-        ]
+        opt["config"] = build_model_config(hps)
         opt["info"] = "%sepoch" % epoch
         opt["sr"] = sr
         opt["f0"] = if_f0
@@ -50,7 +56,7 @@ def savee(ckpt, sr, if_f0, name, epoch, version, hps):
 
 def show_info(path):
     try:
-        a = torch.load(path, map_location="cpu")
+        a = torch_load_compat(path, map_location="cpu")
         return "模型信息:%s\n采样率:%s\n模型是否输入音高引导:%s\n版本:%s" % (
             a.get("info", "None"),
             a.get("sr", "None"),
@@ -63,7 +69,7 @@ def show_info(path):
 
 def extract_small_model(path, name, sr, if_f0, info, version):
     try:
-        ckpt = torch.load(path, map_location="cpu")
+        ckpt = torch_load_compat(path, map_location="cpu")
         if "model" in ckpt:
             ckpt = ckpt["model"]
         opt = OrderedDict()
@@ -193,7 +199,7 @@ def extract_small_model(path, name, sr, if_f0, info, version):
 
 def change_info(path, info, name):
     try:
-        ckpt = torch.load(path, map_location="cpu")
+        ckpt = torch_load_compat(path, map_location="cpu")
         ckpt["info"] = info
         if name == "":
             name = os.path.basename(path)
@@ -216,8 +222,8 @@ def merge(path1, path2, alpha1, sr, f0, info, name, version):
                 opt["weight"][key] = a[key]
             return opt
 
-        ckpt1 = torch.load(path1, map_location="cpu")
-        ckpt2 = torch.load(path2, map_location="cpu")
+        ckpt1 = torch_load_compat(path1, map_location="cpu")
+        ckpt2 = torch_load_compat(path2, map_location="cpu")
         cfg = ckpt1["config"]
         if "model" in ckpt1:
             ckpt1 = extract(ckpt1)
@@ -258,4 +264,71 @@ def merge(path1, path2, alpha1, sr, f0, info, name, version):
         torch.save(opt, "assets/weights/%s.pth" % name)
         return "Success."
     except:
+        return traceback.format_exc()
+
+
+def export_model(
+    ckpt_path,
+    export_name,
+    export_format,
+    strip_optimizer=True,
+    copy_index=True,
+):
+    try:
+        ckpt = torch_load_compat(ckpt_path, map_location="cpu")
+        if export_name == "":
+            export_name = os.path.splitext(os.path.basename(ckpt_path))[0]
+        export_dir = "assets/weights"
+        os.makedirs(export_dir, exist_ok=True)
+
+        config = ckpt.get("config")
+        if config is None:
+            return "Missing config in checkpoint. Please re-export from a newer checkpoint."
+        model_state = ckpt.get("model") or ckpt.get("weight")
+        if model_state is None:
+            return "Missing model weights in checkpoint."
+
+        info = ckpt.get("info", "Exported model.")
+        sr = ckpt.get("sr", ckpt.get("sample_rate"))
+        f0 = ckpt.get("f0", ckpt.get("if_f0"))
+        version = ckpt.get("version", "v1")
+
+        if export_format == "WebUI format":
+            opt = OrderedDict()
+            opt["weight"] = {}
+            for key in model_state.keys():
+                if "enc_q" in key:
+                    continue
+                opt["weight"][key] = model_state[key].half()
+            opt["config"] = config
+            opt["info"] = info
+            opt["sr"] = sr
+            opt["f0"] = f0
+            opt["version"] = version
+        else:
+            opt = OrderedDict()
+            opt["model"] = model_state
+            opt["config"] = config
+            opt["info"] = info
+            opt["sr"] = sr
+            opt["f0"] = f0
+            opt["version"] = version
+            if not strip_optimizer:
+                for key in ("optimizer", "learning_rate", "iteration"):
+                    if key in ckpt:
+                        opt[key] = ckpt[key]
+
+        out_path = os.path.join(export_dir, f"{export_name}.pth")
+        torch.save(opt, out_path)
+
+        if copy_index:
+            ckpt_dir = os.path.dirname(ckpt_path)
+            for filename in os.listdir(ckpt_dir):
+                if filename.endswith(".index"):
+                    shutil.copy(
+                        os.path.join(ckpt_dir, filename),
+                        os.path.join(export_dir, filename),
+                    )
+        return f"Success. Exported to {out_path}"
+    except Exception:
         return traceback.format_exc()

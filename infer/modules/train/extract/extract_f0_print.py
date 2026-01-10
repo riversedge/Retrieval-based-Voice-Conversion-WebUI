@@ -12,6 +12,7 @@ import numpy as np
 import pyworld
 
 from infer.lib.audio import load_audio
+from infer.lib.device import get_device
 
 logging.getLogger("numba").setLevel(logging.WARNING)
 from multiprocessing import Process
@@ -87,7 +88,7 @@ class FeatureInput(object):
 
                 print("Loading rmvpe model")
                 self.model_rmvpe = RMVPE(
-                    "assets/rmvpe/rmvpe.pt", is_half=False, device="cpu"
+                    "assets/rmvpe/rmvpe.pt", is_half=False, device=get_device()
                 )
             f0 = self.model_rmvpe.infer_from_audio(x, thred=0.03)
         return f0

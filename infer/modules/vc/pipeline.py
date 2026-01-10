@@ -271,7 +271,7 @@ class Pipeline(object):
             audio1 = (net_g.infer(*arg)[0][0, 0]).data.cpu().float().numpy()
             del hasp, arg
         del feats, p_len, padding_mask
-        if torch.cuda.is_available():
+        if str(self.device).startswith("cuda"):
             torch.cuda.empty_cache()
         t2 = ttime()
         times[0] += t1 - t0
@@ -452,6 +452,6 @@ class Pipeline(object):
             max_int16 /= audio_max
         audio_opt = (audio_opt * max_int16).astype(np.int16)
         del pitch, pitchf, sid
-        if torch.cuda.is_available():
+        if str(self.device).startswith("cuda"):
             torch.cuda.empty_cache()
         return audio_opt

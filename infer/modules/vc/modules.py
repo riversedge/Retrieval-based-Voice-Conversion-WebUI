@@ -9,6 +9,7 @@ import torch
 from io import BytesIO
 
 from infer.lib.audio import load_audio, wav2
+from infer.lib.torch_load_compat import torch_load_compat
 from infer.lib.infer_pack.models import (
     SynthesizerTrnMs256NSFsid,
     SynthesizerTrnMs256NSFsid_nono,
@@ -60,7 +61,7 @@ class VC:
                 self.hubert_model = self.net_g = self.n_spk = self.hubert_model = (
                     self.tgt_sr
                 ) = None
-                if torch.cuda.is_available():
+                if str(self.config.device).startswith("cuda"):
                     torch.cuda.empty_cache()
                 ###楼下不这么折腾清理不干净
                 self.if_f0 = self.cpt.get("f0", 1)
@@ -80,7 +81,7 @@ class VC:
                     else:
                         self.net_g = SynthesizerTrnMs768NSFsid_nono(*self.cpt["config"])
                 del self.net_g, self.cpt
-                if torch.cuda.is_available():
+                if str(self.config.device).startswith("cuda"):
                     torch.cuda.empty_cache()
             return (
                 {"visible": False, "__type__": "update"},
@@ -100,7 +101,7 @@ class VC:
         person = f'{os.getenv("weight_root")}/{sid}'
         logger.info(f"Loading: {person}")
 
-        self.cpt = torch.load(person, map_location="cpu")
+        self.cpt = torch_load_compat(person, map_location="cpu")
         self.tgt_sr = self.cpt["config"][-1]
         self.cpt["config"][-3] = self.cpt["weight"]["emb_g.weight"].shape[0]  # n_spk
         self.if_f0 = self.cpt.get("f0", 1)

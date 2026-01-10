@@ -9,6 +9,7 @@ from infer.modules.vc.modules import VC
 from infer.modules.uvr5.modules import uvr
 from infer.lib.train.process_ckpt import (
     change_info,
+    export_model,
     extract_small_model,
     merge,
     show_info,
@@ -487,9 +488,15 @@ def click_train(
         if version19 == "v1"
         else "%s/3_feature768" % (exp_dir)
     )
+    if not os.path.exists(gt_wavs_dir):
+        return "请先进行数据预处理!"
+    if not os.path.exists(feature_dir):
+        return "请先进行特征提取!"
     if if_f0_3:
         f0_dir = "%s/2a_f0" % (exp_dir)
         f0nsf_dir = "%s/2b-f0nsf" % (exp_dir)
+        if not os.path.exists(f0_dir) or not os.path.exists(f0nsf_dir):
+            return "请先进行特征提取!"
         names = (
             set([name.split(".")[0] for name in os.listdir(gt_wavs_dir)])
             & set([name.split(".")[0] for name in os.listdir(feature_dir)])
@@ -1576,6 +1583,42 @@ with gr.Blocks(title="RVC WebUI") as app:
                     [ckpt_path2, save_name, sr__, if_f0__, info___, version_1],
                     info7,
                     api_name="ckpt_extract",
+                )
+            with gr.Group():
+                gr.Markdown(value=i18n("导出模型到weights/"))
+                with gr.Row():
+                    export_ckpt_path = gr.Textbox(
+                        label=i18n("模型路径"), value="", interactive=True
+                    )
+                    export_name = gr.Textbox(
+                        label=i18n("导出文件名(不含后缀)"), value="", interactive=True
+                    )
+                    export_format = gr.Radio(
+                        label=i18n("导出格式"),
+                        choices=["WebUI format", "RVC-CLI format (with config)"],
+                        value="WebUI format",
+                        interactive=True,
+                    )
+                with gr.Row():
+                    export_strip_opt = gr.Checkbox(
+                        label=i18n("移除优化器状态"), value=True
+                    )
+                    export_copy_index = gr.Checkbox(
+                        label=i18n("复制索引文件(.index)"), value=True
+                    )
+                    export_button = gr.Button(i18n("导出"), variant="primary")
+                    export_info = gr.Textbox(label=i18n("输出信息"), value="", max_lines=8)
+                export_button.click(
+                    export_model,
+                    [
+                        export_ckpt_path,
+                        export_name,
+                        export_format,
+                        export_strip_opt,
+                        export_copy_index,
+                    ],
+                    export_info,
+                    api_name="ckpt_export",
                 )
 
         with gr.TabItem(i18n("Onnx导出")):

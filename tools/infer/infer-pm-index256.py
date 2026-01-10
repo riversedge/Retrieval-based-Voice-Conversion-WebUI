@@ -29,12 +29,14 @@ from infer.lib.infer_pack.models import (
 )  # hifigan_nsf
 from scipy.io import wavfile
 
+from infer.lib.device import get_device
+
 # from lib.infer_pack.models import SynthesizerTrnMs256NSFsid_sim as SynthesizerTrn256#hifigan_nsf
 # from models import SynthesizerTrn256NSFsim as SynthesizerTrn256#hifigan_nsf
 # from models import SynthesizerTrn256NSFsimFlow as SynthesizerTrn256#hifigan_nsf
 
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = get_device()
 model_path = r"E:\codes\py39\vits_vc_gpu_train\assets\hubert\hubert_base.pt"  #
 logger.info("Load model(s) from {}".format(model_path))
 models, saved_cfg, task = checkpoint_utils.load_model_ensemble_and_task(
@@ -149,7 +151,7 @@ for idx, name in enumerate(
         "padding_mask": padding_mask.to(device),
         "output_layer": 9,  # layer 9
     }
-    if torch.cuda.is_available():
+    if device.type == "cuda":
         torch.cuda.synchronize()
     t0 = ttime()
     with torch.no_grad():
@@ -164,14 +166,14 @@ for idx, name in enumerate(
     )
 
     feats = F.interpolate(feats.permute(0, 2, 1), scale_factor=2).permute(0, 2, 1)
-    if torch.cuda.is_available():
+    if device.type == "cuda":
         torch.cuda.synchronize()
     t1 = ttime()
     # p_len = min(feats.shape[1],10000,pitch.shape[0])#太大了爆显存
     p_len = min(feats.shape[1], 10000)  #
     pitch, pitchf = get_f0(audio, p_len, f0_up_key)
     p_len = min(feats.shape[1], 10000, pitch.shape[0])  # 太大了爆显存
-    if torch.cuda.is_available():
+    if device.type == "cuda":
         torch.cuda.synchronize()
     t2 = ttime()
     feats = feats[:, :p_len, :]
@@ -188,7 +190,7 @@ for idx, name in enumerate(
             .float()
             .numpy()
         )  # nsf
-    if torch.cuda.is_available():
+    if device.type == "cuda":
         torch.cuda.synchronize()
     t3 = ttime()
     ta0 += t1 - t0

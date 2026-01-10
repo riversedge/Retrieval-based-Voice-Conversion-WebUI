@@ -7,6 +7,8 @@ from multiprocessing import cpu_count
 
 import torch
 
+from infer.lib.device import get_device, device_str, is_cuda_available, is_mps_available
+
 try:
     import intel_extension_for_pytorch as ipex  # pylint: disable=import-error, unused-import
 
@@ -137,11 +139,13 @@ class Config:
         logger.info("overwrite preprocess_per to %d" % (self.preprocess_per))
 
     def device_config(self) -> tuple:
-        if torch.cuda.is_available():
+        if is_cuda_available():
             if self.has_xpu():
                 self.device = self.instead = "xpu:0"
                 self.is_half = True
-            i_device = int(self.device.split(":")[-1])
+            if not str(self.device).startswith("xpu"):
+                self.device = str(get_device(self.device))
+            i_device = int(str(self.device).split(":")[-1])
             self.gpu_name = torch.cuda.get_device_name(i_device)
             if (
                 ("16" in self.gpu_name and "V100" not in self.gpu_name.upper())
@@ -165,14 +169,14 @@ class Config:
             )
             if self.gpu_mem <= 4:
                 self.preprocess_per = 3.0
-        elif self.has_mps():
+        elif self.has_mps() or is_mps_available():
             logger.info("No supported Nvidia GPU found")
-            self.device = self.instead = "mps"
+            self.device = self.instead = str(get_device("mps"))
             self.is_half = False
             self.use_fp32_config()
         else:
             logger.info("No supported Nvidia GPU found")
-            self.device = self.instead = "cpu"
+            self.device = self.instead = str(get_device("cpu"))
             self.is_half = False
             self.use_fp32_config()
 
@@ -249,6 +253,6 @@ class Config:
                     pass
         logger.info(
             "Half-precision floating-point: %s, device: %s"
-            % (self.is_half, self.device)
+            % (self.is_half, device_str(self.device))
         )
         return x_pad, x_query, x_center, x_max

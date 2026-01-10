@@ -11,6 +11,8 @@ import numpy as np
 import torch
 from scipy.io.wavfile import read
 
+from infer.lib.torch_load_compat import torch_load_compat
+
 MATPLOTLIB_FLAG = False
 
 logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
@@ -19,7 +21,7 @@ logger = logging
 
 def load_checkpoint_d(checkpoint_path, combd, sbd, optimizer=None, load_opt=1):
     assert os.path.isfile(checkpoint_path)
-    checkpoint_dict = torch.load(checkpoint_path, map_location="cpu")
+    checkpoint_dict = torch_load_compat(checkpoint_path, map_location="cpu")
 
     ##################
     def go(model, bkey):
@@ -99,7 +101,7 @@ def load_checkpoint_d(checkpoint_path, combd, sbd, optimizer=None, load_opt=1):
 #   return model, optimizer, learning_rate, iteration
 def load_checkpoint(checkpoint_path, model, optimizer=None, load_opt=1):
     assert os.path.isfile(checkpoint_path)
-    checkpoint_dict = torch.load(checkpoint_path, map_location="cpu")
+    checkpoint_dict = torch_load_compat(checkpoint_path, map_location="cpu")
 
     saved_state_dict = checkpoint_dict["model"]
     if hasattr(model, "module"):
@@ -141,7 +143,9 @@ def load_checkpoint(checkpoint_path, model, optimizer=None, load_opt=1):
     return model, optimizer, learning_rate, iteration
 
 
-def save_checkpoint(model, optimizer, learning_rate, iteration, checkpoint_path):
+def save_checkpoint(
+    model, optimizer, learning_rate, iteration, checkpoint_path, metadata=None
+):
     logger.info(
         "Saving model and optimizer state at epoch {} to {}".format(
             iteration, checkpoint_path
@@ -151,15 +155,15 @@ def save_checkpoint(model, optimizer, learning_rate, iteration, checkpoint_path)
         state_dict = model.module.state_dict()
     else:
         state_dict = model.state_dict()
-    torch.save(
-        {
-            "model": state_dict,
-            "iteration": iteration,
-            "optimizer": optimizer.state_dict(),
-            "learning_rate": learning_rate,
-        },
-        checkpoint_path,
-    )
+    checkpoint = {
+        "model": state_dict,
+        "iteration": iteration,
+        "optimizer": optimizer.state_dict(),
+        "learning_rate": learning_rate,
+    }
+    if metadata:
+        checkpoint.update(metadata)
+    torch.save(checkpoint, checkpoint_path)
 
 
 def save_checkpoint_d(combd, sbd, optimizer, learning_rate, iteration, checkpoint_path):

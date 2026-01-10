@@ -32,7 +32,7 @@ def load_hubert(config):
 
     def _torch_load(*args, **kwargs):
         kwargs.setdefault("weights_only_default", False)
-        return torch_load_compat(*args, **kwargs)
+        return torch_load_compat(*args, load_fn=original_torch_load, **kwargs)
 
     torch.load = _torch_load
     try:

@@ -107,7 +107,7 @@ _original_torch_load = torch.load
 
 def _torch_load_compat(*args, **kwargs):
     kwargs.setdefault("weights_only_default", False)
-    return torch_load_compat(*args, **kwargs)
+    return torch_load_compat(*args, load_fn=_original_torch_load, **kwargs)
 
 
 torch.load = _torch_load_compat

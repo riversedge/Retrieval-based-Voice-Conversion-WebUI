@@ -18,7 +18,7 @@ def load_hubert(device, model_path="assets/hubert/hubert_base.pt"):
 
     def _torch_load(*args, **kwargs):
         kwargs.setdefault("weights_only_default", False)
-        return torch_load_compat(*args, **kwargs)
+        return torch_load_compat(*args, load_fn=original_torch_load, **kwargs)
 
     torch.load = _torch_load
     try:

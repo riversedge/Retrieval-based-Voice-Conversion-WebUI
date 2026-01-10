@@ -327,11 +327,11 @@ def extract_f0_feature(gpus, n_p, f0method, if_f0, exp_dir, version19, gpus_rmvp
                     config.python_cmd,
                     "infer/modules/train/extract/extract_f0_rmvpe.py",
                     "--exp-dir",
-                    f\"{now_dir}/logs/{exp_dir}\",
+                    f"{now_dir}/logs/{exp_dir}",
                 ]
                 if config.dml:
-                    cmd.extend([\"--device\", \"dml\"])
-                logger.info(\"Execute: \" + \" \".join(cmd))
+                    cmd.extend(["--device", "dml"])
+                logger.info("Execute: " + " ".join(cmd))
                 p = Popen(cmd, cwd=now_dir)
                 p.wait()
                 done = [True]

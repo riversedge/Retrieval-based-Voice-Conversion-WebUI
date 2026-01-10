@@ -160,6 +160,8 @@ def main():
 
 
 def _install_mps_pad_debug():
+    if not _env_flag("RVC_MPS_PAD_DEBUG", False):
+        return
     if getattr(torch.nn.functional.pad, "_rvc_mps_pad_debug", False):
         return
 
@@ -175,9 +177,9 @@ def _install_mps_pad_debug():
         ):
             import traceback
 
-            stack = traceback.extract_stack(limit=12)
+            stack = traceback.format_stack(limit=12)
             callsite = stack[-2] if len(stack) >= 2 else stack[-1]
-            key = (callsite.filename, callsite.lineno, callsite.name)
+            key = callsite
             if key not in seen_callsites:
                 seen_callsites.add(key)
                 print(
@@ -189,7 +191,7 @@ def _install_mps_pad_debug():
                 )
                 print(
                     "MPS pad constant warning: traceback:\n%s"
-                    % "".join(traceback.format_list(stack))
+                    % "".join(stack)
                 )
         return original_pad(x, pad, mode=mode, value=value)
 

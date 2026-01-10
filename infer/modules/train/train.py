@@ -127,6 +127,7 @@ class EpochRecorder:
 
 def main():
     device = get_device()
+    _install_mps_pad_debug()
     ddp_enabled = _env_flag("RVC_DDP", device.type == "cuda")
     if device.type != "cuda":
         ddp_enabled = _env_flag("RVC_DDP", False)
@@ -156,6 +157,44 @@ def main():
 
     for i in range(n_gpus):
         children[i].join()
+
+
+def _install_mps_pad_debug():
+    if getattr(torch.nn.functional.pad, "_rvc_mps_pad_debug", False):
+        return
+
+    seen_callsites = set()
+    original_pad = torch.nn.functional.pad
+
+    def _pad_with_debug(x, pad, mode="constant", value=None):
+        if (
+            getattr(x, "is_mps", False)
+            and x.is_mps
+            and x.dim() > 3
+            and mode == "constant"
+        ):
+            import traceback
+
+            stack = traceback.extract_stack(limit=12)
+            callsite = stack[-2] if len(stack) >= 2 else stack[-1]
+            key = (callsite.filename, callsite.lineno, callsite.name)
+            if key not in seen_callsites:
+                seen_callsites.add(key)
+                print(
+                    "MPS pad constant warning: input=%s dtype=%s device=%s"
+                    % (tuple(x.shape), x.dtype, x.device)
+                )
+                print(
+                    "MPS pad constant warning: pad=%s value=%s" % (pad, value)
+                )
+                print(
+                    "MPS pad constant warning: traceback:\n%s"
+                    % "".join(traceback.format_list(stack))
+                )
+        return original_pad(x, pad, mode=mode, value=value)
+
+    _pad_with_debug._rvc_mps_pad_debug = True
+    torch.nn.functional.pad = _pad_with_debug
 
 
 def run(rank, n_gpus, hps, logger: logging.Logger, ddp_enabled, device):

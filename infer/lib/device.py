@@ -67,3 +67,37 @@ def device_str(prefer: str = "auto") -> str:
     if isinstance(prefer, str) and prefer.strip().lower().startswith("xpu"):
         return prefer
     return str(get_device(prefer))
+
+
+def get_rmvpe_device(prefer: Optional[str] = None) -> tuple[torch.device, str]:
+    env_prefer = os.getenv("RVC_RMVPE_DEVICE") or os.getenv("RVC_DEVICE")
+    if prefer is None:
+        prefer = env_prefer
+    prefer = _normalize_prefer(prefer)
+    if prefer == "gpu":
+        prefer = "auto"
+    if prefer == "dml":
+        try:
+            import torch_directml  # pylint: disable=import-error
+
+            return (
+                torch_directml.device(torch_directml.default_device()),
+                "dml",
+            )
+        except Exception:
+            return torch.device("cpu"), "cpu"
+    if prefer.startswith("cuda"):
+        if is_cuda_available():
+            return torch.device("cuda:0"), "cuda"
+        return torch.device("cpu"), "cpu"
+    if prefer == "mps":
+        if is_mps_available():
+            return torch.device("mps"), "mps"
+        return torch.device("cpu"), "cpu"
+    if prefer == "cpu":
+        return torch.device("cpu"), "cpu"
+    if is_cuda_available():
+        return torch.device("cuda:0"), "cuda"
+    if is_mps_available():
+        return torch.device("mps"), "mps"
+    return torch.device("cpu"), "cpu"

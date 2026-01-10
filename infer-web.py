@@ -16,6 +16,7 @@ from infer.lib.train.process_ckpt import (
 )
 from i18n.i18n import I18nAuto
 from configs.config import Config
+from infer.lib.device import is_mps_available
 from sklearn.cluster import MiniBatchKMeans
 import torch, platform
 import numpy as np
@@ -115,6 +116,9 @@ if torch.cuda.is_available() or ngpu != 0:
 if if_gpu_ok and len(gpu_infos) > 0:
     gpu_info = "\n".join(gpu_infos)
     default_batch_size = min(mem) // 2
+elif is_mps_available():
+    gpu_info = i18n("检测到可用的MPS (Metal) 设备")
+    default_batch_size = 1
 else:
     gpu_info = i18n("很遗憾您这没有能用的显卡来支持您训练")
     default_batch_size = 1
@@ -319,18 +323,16 @@ def extract_f0_feature(gpus, n_p, f0method, if_f0, exp_dir, version19, gpus_rmvp
                     ),
                 ).start()
             else:
-                cmd = (
-                    config.python_cmd
-                    + ' infer/modules/train/extract/extract_f0_rmvpe_dml.py "%s/logs/%s" '
-                    % (
-                        now_dir,
-                        exp_dir,
-                    )
-                )
-                logger.info("Execute: " + cmd)
-                p = Popen(
-                    cmd, shell=True, cwd=now_dir
-                )  # , shell=True, stdin=PIPE, stdout=PIPE, stderr=PIPE, cwd=now_dir
+                cmd = [
+                    config.python_cmd,
+                    "infer/modules/train/extract/extract_f0_rmvpe.py",
+                    "--exp-dir",
+                    f\"{now_dir}/logs/{exp_dir}\",
+                ]
+                if config.dml:
+                    cmd.extend([\"--device\", \"dml\"])
+                logger.info(\"Execute: \" + \" \".join(cmd))
+                p = Popen(cmd, cwd=now_dir)
                 p.wait()
                 done = [True]
         while 1:

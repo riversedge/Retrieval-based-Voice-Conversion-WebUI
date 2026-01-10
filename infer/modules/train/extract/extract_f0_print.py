@@ -1,3 +1,4 @@
+import argparse
 import os
 import sys
 import traceback
@@ -7,18 +8,49 @@ import parselmouth
 now_dir = os.getcwd()
 sys.path.append(now_dir)
 import logging
+import warnings
 
 import numpy as np
-import pyworld
 
 from infer.lib.audio import load_audio
-from infer.lib.device import get_device
+from infer.lib.device import get_rmvpe_device
 
 logging.getLogger("numba").setLevel(logging.WARNING)
 from multiprocessing import Process
 
-exp_dir = sys.argv[1]
-f = open("%s/extract_f0_feature.log" % exp_dir, "a+")
+
+def _parse_args(argv):
+    if not any(arg.startswith("--") for arg in argv):
+        if len(argv) < 3:
+            raise ValueError("Expected legacy args: exp_dir n_p f0method")
+        return {
+            "exp_dir": argv[0],
+            "n_p": int(argv[1]),
+            "f0method": argv[2],
+            "device": None,
+            "quiet": False,
+        }
+    parser = argparse.ArgumentParser()
+    parser.add_argument("exp_dir")
+    parser.add_argument("n_p", type=int)
+    parser.add_argument("f0method")
+    parser.add_argument(
+        "--device",
+        choices=["auto", "cpu", "cuda", "mps", "dml", "gpu"],
+        default=None,
+        help="RMVPE device preference",
+    )
+    parser.add_argument("--quiet", action="store_true")
+    return vars(parser.parse_args(argv))
+
+
+args = _parse_args(sys.argv[1:])
+exp_dir = args["exp_dir"]
+n_p = args["n_p"]
+f0method = args["f0method"]
+device_prefer = args["device"]
+quiet = args["quiet"]
+f = open(f"{exp_dir}/extract_f0_feature.log", "a+")
 
 
 def printt(strr):
@@ -27,14 +59,34 @@ def printt(strr):
     f.flush()
 
 
-n_p = int(sys.argv[2])
-f0method = sys.argv[3]
+def _load_pyworld(quiet_mode):
+    if not quiet_mode:
+        import pyworld
+
+        return pyworld
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="pkg_resources is deprecated as an API",
+            category=UserWarning,
+        )
+        warnings.filterwarnings(
+            "ignore",
+            message="Deprecated call to `pkg_resources.declare_namespace`",
+            category=DeprecationWarning,
+        )
+        import pyworld
+
+    return pyworld
 
 
 class FeatureInput(object):
-    def __init__(self, samplerate=16000, hop_size=160):
+    def __init__(self, device, backend, samplerate=16000, hop_size=160):
         self.fs = samplerate
         self.hop = hop_size
+        self.device = device
+        self.backend = backend
+        self.model_loaded = False
 
         self.f0_bin = 256
         self.f0_max = 1100.0
@@ -65,6 +117,7 @@ class FeatureInput(object):
                     f0, [[pad_size, p_len - len(f0) - pad_size]], mode="constant"
                 )
         elif f0_method == "harvest":
+            pyworld = _load_pyworld(quiet)
             f0, t = pyworld.harvest(
                 x.astype(np.double),
                 fs=self.fs,
@@ -74,6 +127,7 @@ class FeatureInput(object):
             )
             f0 = pyworld.stonemask(x.astype(np.double), f0, t, self.fs)
         elif f0_method == "dio":
+            pyworld = _load_pyworld(quiet)
             f0, t = pyworld.dio(
                 x.astype(np.double),
                 fs=self.fs,
@@ -83,13 +137,15 @@ class FeatureInput(object):
             )
             f0 = pyworld.stonemask(x.astype(np.double), f0, t, self.fs)
         elif f0_method == "rmvpe":
-            if hasattr(self, "model_rmvpe") == False:
+            if not self.model_loaded:
                 from infer.lib.rmvpe import RMVPE
 
+                printt("RMVPE backend: %s" % self.backend)
                 print("Loading rmvpe model")
                 self.model_rmvpe = RMVPE(
-                    "assets/rmvpe/rmvpe.pt", is_half=False, device=get_device()
+                    "assets/rmvpe/rmvpe.pt", is_half=False, device=self.device
                 )
+                self.model_loaded = True
             f0 = self.model_rmvpe.infer_from_audio(x, thred=0.03)
         return f0
 
@@ -145,7 +201,8 @@ if __name__ == "__main__":
     # n_p=16
     # f = open("%s/log_extract_f0.log"%exp_dir, "w")
     printt(" ".join(sys.argv))
-    featureInput = FeatureInput()
+    device, backend = get_rmvpe_device(device_prefer)
+    featureInput = FeatureInput(device=device, backend=backend)
     paths = []
     inp_root = "%s/1_16k_wavs" % (exp_dir)
     opt_root1 = "%s/2a_f0" % (exp_dir)
@@ -160,17 +217,7 @@ if __name__ == "__main__":
         opt_path1 = "%s/%s" % (opt_root1, name)
         opt_path2 = "%s/%s" % (opt_root2, name)
         paths.append([inp_path, opt_path1, opt_path2])
-
-    ps = []
-    for i in range(n_p):
-        p = Process(
-            target=featureInput.go,
-            args=(
-                paths[i::n_p],
-                f0method,
-            ),
-        )
-        ps.append(p)
-        p.start()
-    for i in range(n_p):
-        ps[i].join()
+    try:
+        featureInput.go(paths, f0method)
+    except:
+        printt("f0_all_fail-%s" % (traceback.format_exc()))

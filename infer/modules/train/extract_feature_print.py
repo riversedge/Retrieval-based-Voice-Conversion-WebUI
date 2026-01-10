@@ -5,6 +5,9 @@ import traceback
 import torch
 from fairseq.data.dictionary import Dictionary
 
+now_dir = os.getcwd()
+sys.path.append(now_dir)
+
 from infer.lib.device import get_device
 from infer.lib.torch_load_compat import torch_load_compat
 

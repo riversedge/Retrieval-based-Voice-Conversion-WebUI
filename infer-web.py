@@ -488,6 +488,8 @@ def click_train(
         if version19 == "v1"
         else "%s/3_feature768" % (exp_dir)
     )
+    if not os.path.exists(gt_wavs_dir):
+        return "请先进行数据预处理!"
     if not os.path.exists(feature_dir):
         return "请先进行特征提取!"
     if if_f0_3:

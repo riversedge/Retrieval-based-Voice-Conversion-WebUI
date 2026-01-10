@@ -22,7 +22,6 @@ def get_index_path_from_model(sid):
         "",
     )
 
-
 def load_hubert(config):
     try:
         torch.serialization.add_safe_globals([Dictionary])

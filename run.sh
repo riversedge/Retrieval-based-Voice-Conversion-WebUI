@@ -3,6 +3,11 @@
 if [ "$(uname)" = "Darwin" ]; then
   # macOS specific env:
   export RVC_DEVICE=mps
+  export RVC_NUM_THREADS=4
+  export RVC_NUM_INTEROP_THREADS=1
+  export RVC_NUM_WORKERS=2
+  export RVC_PIN_MEMORY=0
+  export RVC_TB_IMAGES=0
   export PYTORCH_ENABLE_MPS_FALLBACK=1
   export PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0
 elif [ "$(uname)" != "Linux" ]; then

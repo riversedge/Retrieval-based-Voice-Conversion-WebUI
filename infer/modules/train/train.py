@@ -178,6 +178,13 @@ def run(rank, n_gpus, hps, logger: logging.Logger, ddp_enabled, device):
     if device_type == "cuda":
         torch.cuda.set_device(rank)
 
+    if device_type == "mps":
+        default_threads = min(4, os.cpu_count() or 1)
+        num_threads = _env_int("RVC_NUM_THREADS", default_threads)
+        num_interop = _env_int("RVC_NUM_INTEROP_THREADS", 1)
+        torch.set_num_threads(num_threads)
+        torch.set_num_interop_threads(num_interop)
+
     fp16_run = _env_flag("RVC_FP16", hps.train.fp16_run)
     amp_enabled = _env_flag("RVC_AMP", fp16_run)
     if device_type != "cuda":
@@ -241,6 +248,13 @@ def run(rank, n_gpus, hps, logger: logging.Logger, ddp_enabled, device):
     net_g = net_g.to(device)
     net_d = MultiPeriodDiscriminator(hps.model.use_spectral_norm)
     net_d = net_d.to(device)
+    if rank == 0:
+        logger.info(
+            "Training device: %s (net_g params: %s)",
+            device_str(device),
+            next(net_g.parameters()).device,
+        )
+        print("MODEL DEVICE:", next(net_g.parameters()).device)
     optim_g = torch.optim.AdamW(
         net_g.parameters(),
         hps.train.learning_rate,
@@ -503,6 +517,7 @@ def train_and_evaluate(
 
     # Run steps
     epoch_recorder = EpochRecorder()
+    batch_device_logged = False
     for batch_idx, info in data_iterator:
         # Data
         ## Unpack
@@ -545,6 +560,10 @@ def train_and_evaluate(
                 spec = spec.to(device)
                 spec_lengths = spec_lengths.to(device)
                 wave = wave.to(device)
+
+        if not batch_device_logged:
+            print("BATCH DEVICE:", wave.device)
+            batch_device_logged = True
             # wave_lengths = wave_lengths.cuda(rank, non_blocking=True)
 
         # Calculate

@@ -1,27 +1,58 @@
+import argparse
 import os
 import sys
 import traceback
-
-import parselmouth
 
 now_dir = os.getcwd()
 sys.path.append(now_dir)
 import logging
 
 import numpy as np
-import pyworld
 
 from infer.lib.audio import load_audio
-from infer.lib.device import get_device
+from infer.lib.device import get_rmvpe_device
 
 logging.getLogger("numba").setLevel(logging.WARNING)
 
-n_part = int(sys.argv[1])
-i_part = int(sys.argv[2])
-i_gpu = sys.argv[3]
+
+def _parse_args(argv):
+    if not any(arg.startswith("--") for arg in argv):
+        if len(argv) < 5:
+            raise ValueError("Expected legacy args: n_part i_part i_gpu exp_dir is_half")
+        return {
+            "n_part": int(argv[0]),
+            "i_part": int(argv[1]),
+            "i_gpu": argv[2],
+            "exp_dir": argv[3],
+            "is_half": argv[4],
+            "device": None,
+            "dry_run": False,
+        }
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--n-part", type=int, default=1)
+    parser.add_argument("--i-part", type=int, default=0)
+    parser.add_argument("--i-gpu", default="0")
+    parser.add_argument("--exp-dir", required=True)
+    parser.add_argument("--is-half", default="true")
+    parser.add_argument(
+        "--device",
+        choices=["auto", "cpu", "cuda", "mps", "dml", "gpu"],
+        default=None,
+        help="RMVPE device preference",
+    )
+    parser.add_argument("--dry-run", action="store_true")
+    return vars(parser.parse_args(argv))
+
+
+args = _parse_args(sys.argv[1:])
+n_part = args["n_part"]
+i_part = args["i_part"]
+i_gpu = args["i_gpu"]
+exp_dir = args["exp_dir"]
+use_half = str(args["is_half"]).lower() in {"true", "1", "yes"}
+device_prefer = args["device"]
+dry_run = args["dry_run"]
 os.environ["CUDA_VISIBLE_DEVICES"] = str(i_gpu)
-exp_dir = sys.argv[4]
-is_half = sys.argv[5]
 f = open("%s/extract_f0_feature.log" % exp_dir, "a+")
 
 
@@ -31,11 +62,44 @@ def printt(strr):
     f.flush()
 
 
+def _select_rmvpe_device(prefer):
+    requested = (
+        prefer or os.getenv("RVC_RMVPE_DEVICE") or os.getenv("RVC_DEVICE") or ""
+    ).strip().lower()
+    if requested == "gpu":
+        requested = ""
+    device, backend = get_rmvpe_device(prefer or None)
+    if requested in {"cuda", "mps", "cpu", "dml"} and backend != requested:
+        printt(
+            "Requested RMVPE device '%s' is unavailable; falling back to %s."
+            % (requested, backend)
+        )
+    return device, backend
+
+
+def _log_backend(backend):
+    printt("RMVPE backend: %s" % backend)
+
+
+def _run_dry_run(device, backend, use_half):
+    from infer.lib.rmvpe import RMVPE
+
+    _log_backend(backend)
+    printt("Loading rmvpe model (dry-run)")
+    model = RMVPE("assets/rmvpe/rmvpe.pt", is_half=use_half, device=device)
+    dummy_audio = np.zeros(16000, dtype=np.float32)
+    _ = model.infer_from_audio(dummy_audio, thred=0.03)
+    printt("RMVPE dry-run succeeded")
+
+
 class FeatureInput(object):
-    def __init__(self, samplerate=16000, hop_size=160):
+    def __init__(self, device, backend, use_half, samplerate=16000, hop_size=160):
         self.fs = samplerate
         self.hop = hop_size
-
+        self.device = device
+        self.backend = backend
+        self.use_half = use_half
+        self.model_loaded = False
         self.f0_bin = 256
         self.f0_max = 1100.0
         self.f0_min = 50.0
@@ -44,15 +108,16 @@ class FeatureInput(object):
 
     def compute_f0(self, path, f0_method):
         x = load_audio(path, self.fs)
-        # p_len = x.shape[0] // self.hop
         if f0_method == "rmvpe":
-            if hasattr(self, "model_rmvpe") == False:
+            if not self.model_loaded:
                 from infer.lib.rmvpe import RMVPE
 
+                _log_backend(self.backend)
                 print("Loading rmvpe model")
                 self.model_rmvpe = RMVPE(
-                    "assets/rmvpe/rmvpe.pt", is_half=is_half, device=get_device()
+                    "assets/rmvpe/rmvpe.pt", is_half=self.use_half, device=self.device
                 )
+                self.model_loaded = True
             f0 = self.model_rmvpe.infer_from_audio(x, thred=0.03)
         return f0
 
@@ -108,7 +173,11 @@ if __name__ == "__main__":
     # n_p=16
     # f = open("%s/log_extract_f0.log"%exp_dir, "w")
     printt(" ".join(sys.argv))
-    featureInput = FeatureInput()
+    device, backend = _select_rmvpe_device(device_prefer)
+    if dry_run:
+        _run_dry_run(device, backend, use_half)
+        raise SystemExit(0)
+    featureInput = FeatureInput(device=device, backend=backend, use_half=use_half)
     paths = []
     inp_root = "%s/1_16k_wavs" % (exp_dir)
     opt_root1 = "%s/2a_f0" % (exp_dir)
@@ -127,16 +196,3 @@ if __name__ == "__main__":
         featureInput.go(paths[i_part::n_part], "rmvpe")
     except:
         printt("f0_all_fail-%s" % (traceback.format_exc()))
-    # ps = []
-    # for i in range(n_p):
-    #     p = Process(
-    #         target=featureInput.go,
-    #         args=(
-    #             paths[i::n_p],
-    #             f0method,
-    #         ),
-    #     )
-    #     ps.append(p)
-    #     p.start()
-    # for i in range(n_p):
-    #     ps[i].join()

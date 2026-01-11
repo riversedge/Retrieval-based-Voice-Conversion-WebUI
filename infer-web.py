@@ -618,7 +618,7 @@ def click_train(
     logger.info("Execute: " + cmd)
     p = Popen(cmd, shell=True, cwd=now_dir)
     p.wait()
-    return "训练结束, 您可查看控制台训练日志或实验文件夹下的train.log"
+    return i18n("训练结束, 您可查看控制台训练日志或实验文件夹下的train.log")
 
 
 # but4.click(train_index, [exp_dir1], info3)

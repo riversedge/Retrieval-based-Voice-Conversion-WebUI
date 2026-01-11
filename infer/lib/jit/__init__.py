@@ -7,6 +7,7 @@ from collections import OrderedDict
 
 from infer.lib.torch_load_compat import torch_load_compat
 
+
 def load_inputs(path, device, is_half=False):
     parm = torch_load_compat(path, map_location=torch.device("cpu"))
     for key in parm.keys():

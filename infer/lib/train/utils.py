@@ -239,12 +239,12 @@ def plot_spectrogram_to_numpy(spectrogram):
     plt.tight_layout()
 
     fig.canvas.draw()
-#    data = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8, sep="")
-#    data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+    #    data = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8, sep="")
+    #    data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
     # Matplotlib compatibility: prefer buffer_rgba (newer backends), fall back to tostring_rgb (older)
     if hasattr(fig.canvas, "buffer_rgba"):
-        buf = np.asarray(fig.canvas.buffer_rgba())          # (H, W, 4) RGBA
-        data = buf[:, :, :3].astype(np.uint8)               # -> (H, W, 3) RGB
+        buf = np.asarray(fig.canvas.buffer_rgba())  # (H, W, 4) RGBA
+        data = buf[:, :, :3].astype(np.uint8)  # -> (H, W, 3) RGB
     else:
         data = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
         w, h = fig.canvas.get_width_height()
@@ -278,11 +278,11 @@ def plot_alignment_to_numpy(alignment, info=None):
     plt.tight_layout()
 
     fig.canvas.draw()
-#    data = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8, sep="")
-#    data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+    #    data = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8, sep="")
+    #    data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
     if hasattr(fig.canvas, "buffer_rgba"):
-        buf = np.asarray(fig.canvas.buffer_rgba())          # (H, W, 4) RGBA
-        data = buf[:, :, :3].astype(np.uint8)               # -> (H, W, 3) RGB
+        buf = np.asarray(fig.canvas.buffer_rgba())  # (H, W, 4) RGBA
+        data = buf[:, :, :3].astype(np.uint8)  # -> (H, W, 3) RGB
     else:
         data = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
         w, h = fig.canvas.get_width_height()
@@ -303,7 +303,7 @@ def load_filepaths_and_text(filename, split="|"):
     except UnicodeDecodeError:
         with open(filename) as f:
             filepaths_and_text = [line.strip().split(split) for line in f]
-    
+
     return filepaths_and_text
 
 

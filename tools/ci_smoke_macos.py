@@ -38,7 +38,9 @@ def hubert_forward(device):
     feats = torch.from_numpy(audio).float().unsqueeze(0).to(device)
     padding_mask = torch.zeros_like(feats, dtype=torch.bool).to(device)
     with torch.no_grad():
-        _ = model.extract_features(source=feats, padding_mask=padding_mask, output_layer=9)
+        _ = model.extract_features(
+            source=feats, padding_mask=padding_mask, output_layer=9
+        )
 
 
 def train_one_step(device):

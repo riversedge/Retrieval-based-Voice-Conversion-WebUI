@@ -8,6 +8,7 @@ import torch
 import torch.nn.functional as F
 
 from infer.lib.torch_load_compat import torch_load_compat
+
 # from fairseq.data.data_utils import compute_mask_indices
 from fairseq.utils import index_put
 

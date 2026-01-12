@@ -1319,7 +1319,7 @@ with gr.Blocks(title="RVC WebUI") as app:
                         maximum=1000,
                         step=1,
                         label=i18n("总训练轮数total_epoch"),
-                        value=20,
+                        value=200,
                         interactive=True,
                     )
                     batch_size12 = gr.Slider(
@@ -1327,7 +1327,7 @@ with gr.Blocks(title="RVC WebUI") as app:
                         maximum=40,
                         step=1,
                         label=i18n("每张显卡的batch_size"),
-                        value=default_batch_size,
+                        value=4,
                         interactive=True,
                     )
                     if_save_latest13 = gr.Radio(
@@ -1349,7 +1349,7 @@ with gr.Blocks(title="RVC WebUI") as app:
                             "是否在每次保存时间点将最终小模型保存至weights文件夹"
                         ),
                         choices=[i18n("是"), i18n("否")],
-                        value=i18n("否"),
+                        value=i18n("是"),
                         interactive=True,
                     )
                 with gr.Row():

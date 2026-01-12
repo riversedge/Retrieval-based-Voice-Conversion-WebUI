@@ -302,17 +302,13 @@ def run(rank, n_gpus, hps, logger: logging.Logger, ddp_enabled, device):
             if hasattr(net_g, "module"):
                 logger.info(
                     net_g.module.load_state_dict(
-                        torch_load_compat(hps.pretrainG, map_location="cpu")[
-                            "model"
-                        ]
+                        torch_load_compat(hps.pretrainG, map_location="cpu")["model"]
                     )
                 )  ##测试不加载优化器
             else:
                 logger.info(
                     net_g.load_state_dict(
-                        torch_load_compat(hps.pretrainG, map_location="cpu")[
-                            "model"
-                        ]
+                        torch_load_compat(hps.pretrainG, map_location="cpu")["model"]
                     )
                 )  ##测试不加载优化器
         if hps.pretrainD != "":
@@ -321,17 +317,13 @@ def run(rank, n_gpus, hps, logger: logging.Logger, ddp_enabled, device):
             if hasattr(net_d, "module"):
                 logger.info(
                     net_d.module.load_state_dict(
-                        torch_load_compat(hps.pretrainD, map_location="cpu")[
-                            "model"
-                        ]
+                        torch_load_compat(hps.pretrainD, map_location="cpu")["model"]
                     )
                 )
             else:
                 logger.info(
                     net_d.load_state_dict(
-                        torch_load_compat(hps.pretrainD, map_location="cpu")[
-                            "model"
-                        ]
+                        torch_load_compat(hps.pretrainD, map_location="cpu")["model"]
                     )
                 )
 

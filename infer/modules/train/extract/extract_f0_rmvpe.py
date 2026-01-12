@@ -18,7 +18,9 @@ logging.getLogger("numba").setLevel(logging.WARNING)
 def _parse_args(argv):
     if not any(arg.startswith("--") for arg in argv):
         if len(argv) < 5:
-            raise ValueError("Expected legacy args: n_part i_part i_gpu exp_dir is_half")
+            raise ValueError(
+                "Expected legacy args: n_part i_part i_gpu exp_dir is_half"
+            )
         return {
             "n_part": int(argv[0]),
             "i_part": int(argv[1]),
@@ -64,8 +66,10 @@ def printt(strr):
 
 def _select_rmvpe_device(prefer):
     requested = (
-        prefer or os.getenv("RVC_RMVPE_DEVICE") or os.getenv("RVC_DEVICE") or ""
-    ).strip().lower()
+        (prefer or os.getenv("RVC_RMVPE_DEVICE") or os.getenv("RVC_DEVICE") or "")
+        .strip()
+        .lower()
+    )
     if requested == "gpu":
         requested = ""
     device, backend = get_rmvpe_device(prefer or None)

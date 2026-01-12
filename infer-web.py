@@ -1616,7 +1616,9 @@ with gr.Blocks(title="RVC WebUI") as app:
                         label=i18n("复制索引文件(.index)"), value=True
                     )
                     export_button = gr.Button(i18n("导出"), variant="primary")
-                    export_info = gr.Textbox(label=i18n("输出信息"), value="", max_lines=8)
+                    export_info = gr.Textbox(
+                        label=i18n("输出信息"), value="", max_lines=8
+                    )
                 export_button.click(
                     export_model,
                     [

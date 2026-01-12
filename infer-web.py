@@ -1216,6 +1216,10 @@ with gr.Blocks(title="RVC WebUI") as app:
                     interactive=True,
                 )
             with gr.Group():  # 暂时单人的, 后面支持最多4人的#数据处理
+                if platform.system() == "Darwin":
+                    default_trainset_dir = str(pathlib.Path.home() / "Music")
+                else:
+                    default_trainset_dir = i18n("E:\\语音音频+标注\\米津玄师\\src")
                 gr.Markdown(
                     value=i18n(
                         "step2a: 自动遍历训练文件夹下所有可解码成音频的文件并进行切片归一化, 在实验目录下生成2个wav文件夹; 暂时只支持单人训练. "
@@ -1224,7 +1228,7 @@ with gr.Blocks(title="RVC WebUI") as app:
                 with gr.Row():
                     trainset_dir4 = gr.Textbox(
                         label=i18n("输入训练文件夹路径"),
-                        value=i18n("E:\\语音音频+标注\\米津玄师\\src"),
+                        value=default_trainset_dir,
                     )
                     spk_id5 = gr.Slider(
                         minimum=0,

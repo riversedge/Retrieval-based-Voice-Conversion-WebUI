@@ -2,6 +2,7 @@ import os
 import sys
 import traceback
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,76 @@ sys.path.append(now_dir)
 bh, ah = signal.butter(N=5, Wn=48, btype="high", fs=16000)
 
 input_audio_path2wav = {}
+
+
+NOTE_TO_SEMITONE = {
+    "C": 0,
+    "D": 2,
+    "E": 4,
+    "F": 5,
+    "G": 7,
+    "A": 9,
+    "B": 11,
+}
+
+
+def parse_f0_range(range_text):
+    if range_text is None:
+        return None
+    range_text = str(range_text).strip()
+    if not range_text:
+        return None
+    cleaned = range_text.replace("–", "-").replace("—", "-")
+    parts = re.split(r"\s*-\s*|\s+to\s+", cleaned, maxsplit=1)
+    if len(parts) != 2:
+        return None
+
+    def parse_note(token):
+        token = token.strip().lower().replace("hz", "").strip()
+        if not token:
+            return None
+        match = re.match(r"^([a-g])([#b]?)(-?\d+)$", token, re.IGNORECASE)
+        if match:
+            note, accidental, octave = match.groups()
+            semitone = NOTE_TO_SEMITONE[note.upper()]
+            if accidental == "#":
+                semitone += 1
+            elif accidental == "b":
+                semitone -= 1
+            midi = (int(octave) + 1) * 12 + semitone
+            return 440.0 * (2 ** ((midi - 69) / 12))
+        try:
+            return float(token)
+        except ValueError:
+            return None
+
+    f0_min = parse_note(parts[0])
+    f0_max = parse_note(parts[1])
+    if f0_min is None or f0_max is None:
+        return None
+    if f0_min > f0_max:
+        f0_min, f0_max = f0_max, f0_min
+    return f0_min, f0_max
+
+
+def adjust_f0_to_range(f0, f0_range):
+    if not f0_range:
+        return f0
+    f0_min, f0_max = f0_range
+    if f0_min <= 0 or f0_max <= 0:
+        return f0
+    f0_adj = f0.copy()
+    valid = f0_adj > 0
+    if not np.any(valid):
+        return f0_adj
+    f0_valid = f0_adj[valid]
+    k = np.zeros_like(f0_valid)
+    too_low = f0_valid < f0_min
+    too_high = f0_valid > f0_max
+    k[too_low] = np.ceil(np.log2(f0_min / f0_valid[too_low]))
+    k[too_high] = -np.ceil(np.log2(f0_valid[too_high] / f0_max))
+    f0_adj[valid] = f0_valid * (2 ** k)
+    return f0_adj
 
 
 @lru_cache
@@ -89,6 +160,7 @@ class Pipeline(object):
         f0_up_key,
         f0_method,
         filter_radius,
+        f0_range=None,
         inp_f0=None,
     ):
         global input_audio_path2wav
@@ -172,6 +244,21 @@ class Pipeline(object):
             f0[self.x_pad * tf0 : self.x_pad * tf0 + len(replace_f0)] = replace_f0[
                 :shape
             ]
+        elif f0_range:
+            f0_valid = f0[f0 > 0]
+            f0 = adjust_f0_to_range(f0, f0_range)
+            if f0_valid.size:
+                f0_adj_valid = f0[f0 > 0]
+                if f0_adj_valid.size:
+                    logger.info(
+                        "Applied f0 range %.2f-%.2f Hz. f0 min/max: %.2f/%.2f -> %.2f/%.2f",
+                        f0_range[0],
+                        f0_range[1],
+                        float(f0_valid.min()),
+                        float(f0_valid.max()),
+                        float(f0_adj_valid.min()),
+                        float(f0_adj_valid.max()),
+                    )
         # with open("test_opt.txt","w")as f:f.write("\n".join([str(i)for i in f0.tolist()]))
         f0bak = f0.copy()
         f0_mel = 1127 * np.log(1 + f0 / 700)
@@ -297,6 +384,7 @@ class Pipeline(object):
         rms_mix_rate,
         version,
         protect,
+        f0_range=None,
         f0_file=None,
     ):
         if (
@@ -350,6 +438,10 @@ class Pipeline(object):
                 traceback.print_exc()
         sid = torch.tensor(sid, device=self.device).unsqueeze(0).long()
         pitch, pitchf = None, None
+        raw_f0_range = f0_range
+        f0_range = parse_f0_range(f0_range)
+        if raw_f0_range and not f0_range:
+            logger.warning("Invalid f0 range input: %s", raw_f0_range)
         if if_f0 == 1:
             pitch, pitchf = self.get_f0(
                 input_audio_path,
@@ -358,6 +450,7 @@ class Pipeline(object):
                 f0_up_key,
                 f0_method,
                 filter_radius,
+                f0_range,
                 inp_f0,
             )
             pitch = pitch[:p_len]

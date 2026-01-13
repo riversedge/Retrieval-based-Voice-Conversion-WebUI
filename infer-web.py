@@ -884,6 +884,13 @@ with gr.Blocks(title="RVC WebUI") as app:
                                 value="rmvpe",
                                 interactive=True,
                             )
+                            f0_range0 = gr.Textbox(
+                                label=i18n(
+                                    "输入音高范围(可选, 如 E2 - B4 或 80-400Hz)"
+                                ),
+                                placeholder="E2 - B4",
+                                interactive=True,
+                            )
 
                         with gr.Column():
                             resample_sr0 = gr.Slider(
@@ -973,6 +980,7 @@ with gr.Blocks(title="RVC WebUI") as app:
                                 resample_sr0,
                                 rms_mix_rate0,
                                 protect0,
+                                f0_range0,
                             ],
                             [vc_output1, vc_output2],
                             api_name="infer_convert",
@@ -1012,6 +1020,13 @@ with gr.Blocks(title="RVC WebUI") as app:
                                 else ["pm", "harvest", "rmvpe"]
                             ),
                             value="rmvpe",
+                            interactive=True,
+                        )
+                        f0_range1 = gr.Textbox(
+                            label=i18n(
+                                "输入音高范围(可选, 如 E2 - B4 或 80-400Hz)"
+                            ),
+                            placeholder="E2 - B4",
                             interactive=True,
                         )
                         format1 = gr.Radio(
@@ -1112,6 +1127,7 @@ with gr.Blocks(title="RVC WebUI") as app:
                             rms_mix_rate1,
                             protect1,
                             format1,
+                            f0_range1,
                         ],
                         [vc_output3],
                         api_name="infer_convert_batch",

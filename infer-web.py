@@ -1023,9 +1023,7 @@ with gr.Blocks(title="RVC WebUI") as app:
                             interactive=True,
                         )
                         f0_range1 = gr.Textbox(
-                            label=i18n(
-                                "输入音高范围(可选, 如 E2 - B4 或 80-400Hz)"
-                            ),
+                            label=i18n("输入音高范围(可选, 如 E2 - B4 或 80-400Hz)"),
                             placeholder="E2 - B4",
                             interactive=True,
                         )
@@ -1632,7 +1630,9 @@ with gr.Blocks(title="RVC WebUI") as app:
                         label=i18n("复制索引文件(.index)"), value=True
                     )
                     export_button = gr.Button(i18n("导出"), variant="primary")
-                    export_info = gr.Textbox(label=i18n("输出信息"), value="", max_lines=8)
+                    export_info = gr.Textbox(
+                        label=i18n("输出信息"), value="", max_lines=8
+                    )
                 export_button.click(
                     export_model,
                     [

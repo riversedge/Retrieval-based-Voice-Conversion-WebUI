@@ -93,7 +93,7 @@ def adjust_f0_to_range(f0, f0_range):
     too_high = f0_valid > f0_max
     k[too_low] = np.ceil(np.log2(f0_min / f0_valid[too_low]))
     k[too_high] = -np.ceil(np.log2(f0_valid[too_high] / f0_max))
-    f0_adj[valid] = f0_valid * (2 ** k)
+    f0_adj[valid] = f0_valid * (2**k)
     return f0_adj
 
 

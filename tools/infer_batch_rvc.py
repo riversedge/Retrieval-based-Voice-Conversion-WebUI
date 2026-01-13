@@ -31,6 +31,12 @@ def arg_parse() -> tuple:
     parser.add_argument("--resample_sr", type=int, default=0, help="resample sr")
     parser.add_argument("--rms_mix_rate", type=float, default=1, help="rms mix rate")
     parser.add_argument("--protect", type=float, default=0.33, help="protect")
+    parser.add_argument(
+        "--f0_range",
+        type=str,
+        default="",
+        help="optional f0 range like 'E2 - B4' or '80-400Hz'",
+    )
 
     args = parser.parse_args()
     sys.argv = sys.argv[:1]
@@ -63,6 +69,7 @@ def main():
                 args.resample_sr,
                 args.rms_mix_rate,
                 args.protect,
+                args.f0_range,
             )
             out_path = os.path.join(args.opt_path, file)
             wavfile.write(out_path, wav_opt[0], wav_opt[1])

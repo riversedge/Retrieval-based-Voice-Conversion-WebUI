@@ -122,6 +122,7 @@
   "输入待处理音频文件夹路径": "Enter the path of the audio folder to be processed:",
   "输入待处理音频文件夹路径(去文件管理器地址栏拷就行了)": "Enter the path of the audio folder to be processed (copy it from the address bar of the file manager):",
   "输入待处理音频文件路径(默认是正确格式示例)": "Enter the path of the audio file to be processed (default is the correct format example):",
+  "输入音高范围(可选, 如 E2 - B4 或 80-400Hz)": "Pitch range (optional, e.g. E2 - B4 or 80-400Hz)",
   "输入源音量包络替换输出音量包络融合比例，越靠近1越使用输出包络": "Adjust the volume envelope scaling. Closer to 0, the more it mimicks the volume of the original vocals. Can help mask noise and make volume sound more natural when set relatively low. Closer to 1 will be more of a consistently loud volume:",
   "输入监听": "Input voice monitor",
   "输入训练文件夹路径": "Enter the path of the training folder:",

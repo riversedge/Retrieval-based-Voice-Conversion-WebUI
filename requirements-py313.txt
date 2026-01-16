@@ -1,11 +1,11 @@
 joblib>=1.5.3
-numba==0.63.1
-numpy==2.3.5
+numba
+numpy
 scipy
 librosa==0.11.0
-llvmlite==0.46.0
-fairseq==0.12.2
-faiss-cpu==1.7.3
+llvmlite
+fairseq @ git+https://github.com/One-sixth/fairseq.git
+faiss-cpu
 gradio==6.2.0
 Cython
 pydub>=0.25.1
@@ -38,10 +38,11 @@ uvicorn>=0.40.0
 colorama>=0.4.6
 pyworld==0.3.5
 httpx
-onnxruntime-directml
+onnxruntime; sys_platform == 'darwin'
+onnxruntime-gpu; sys_platform != 'darwin'
 torchcrepe==0.0.24
 fastapi==0.128.0
-ffmpy==1.0.0
-python-dotenv>=1.2.1
-av
 torchfcpe
+ffmpy==1.0.0.
+python-dotenv>=1.2.0
+av

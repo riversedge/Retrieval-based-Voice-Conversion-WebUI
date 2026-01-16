@@ -92,17 +92,25 @@ def uvr(model_name, inp_root, save_root_vocal, paths, save_root_ins, agg, format
     except:
         infos.append(traceback.format_exc())
         yield "\n".join(infos)
+
     finally:
         try:
-            if model_name == "onnx_dereverb_By_FoxJoy":
-                del pre_fun.pred.model
-                del pre_fun.pred.model_
-            else:
-                del pre_fun.model
-                del pre_fun
-        except:
+            if "pre_fun" in locals():
+                if model_name == "onnx_dereverb_By_FoxJoy":
+                    if hasattr(pre_fun, "pred"):
+                        if hasattr(pre_fun.pred, "model"):
+                            del pre_fun.pred.model
+                        if hasattr(pre_fun.pred, "model_"):
+                            del pre_fun.pred.model_
+                else:
+                    if hasattr(pre_fun, "model"):
+                        del pre_fun.model
+                    del pre_fun
+        except Exception:
             traceback.print_exc()
+    
         if str(config.device).startswith("cuda"):
             torch.cuda.empty_cache()
             logger.info("Executed torch.cuda.empty_cache()")
+
     yield "\n".join(infos)

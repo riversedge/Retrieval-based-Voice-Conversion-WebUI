@@ -850,8 +850,9 @@ def convert_guided_with_octave_option(
 
 OCTAVE_CORRECTION_HELP = (
     "Reduce pitch-doubling or halving errors across changing notes and phrase "
-    "endings using continuity and the source audio. Works with or without a "
-    "pitch range. May alter intentional large leaps; compare with it off. "
+    "endings using stable notes and the source audio. Ambiguous transitions "
+    "keep their original pitch. Works with or without a pitch range. "
+    "May alter intentional large leaps; compare with it off. "
     "Supplied F0 curves are left unchanged."
 )
 

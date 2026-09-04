@@ -1,4 +1,6 @@
 import unittest
+import json
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -9,6 +11,40 @@ from infer.modules.vc.pipeline import Pipeline
 
 
 class OctaveContinuityTests(unittest.TestCase):
+    def test_measured_true_errors_and_false_correction_regressions(self):
+        fixture = json.loads((Path(__file__).parent / "fixtures/octave_transitions.json").read_text())
+        for case in fixture["cases"]:
+            with self.subTest(case=case["name"]):
+                raw = np.array(case["f0_hz"])
+                # Recorded source-waveform evidence makes these realistic
+                # decision tests portable, without shipping private audio.
+                with patch("infer.modules.vc.pitch_correction._periodicity",
+                           return_value=np.array(case["periodicity"])):
+                    fixed = correct_octave_jumps(raw, audio=np.zeros(len(raw) * 160))
+                for start, stop, factor in case["checks"]:
+                    np.testing.assert_array_equal(fixed[start:stop], raw[start:stop] * factor)
+
+    def test_thirds_fourths_and_fifths_remain_melodic_choices(self):
+        for interval in (3, 4, 5, 7):
+            for direction in (-1, 1):
+                middle = 220 * 2 ** (direction * interval / 12)
+                raw = np.r_[np.full(40, 220.), np.full(50, middle), np.full(40, 220.)]
+                np.testing.assert_array_equal(correct_octave_jumps(raw), raw)
+
+    def test_low_syllable_transition_does_not_reset_next_notes(self):
+        raw = np.r_[np.full(50, 220.), np.linspace(220, 110, 12),
+                    np.full(50, 246.94), np.full(50, 293.66), np.full(30, 329.63)]
+        fixed = correct_octave_jumps(raw)
+        np.testing.assert_array_equal(fixed[62:], raw[62:])
+
+    def test_waveform_without_pitch_evidence_cannot_authorize_correction(self):
+        raw = np.r_[np.full(50, 220.), np.full(35, 440.), np.full(50, 220.)]
+        np.testing.assert_array_equal(correct_octave_jumps(raw, audio=np.zeros(len(raw) * 160)), raw)
+
+    def test_unsupported_onset_does_not_raise_the_following_phrase(self):
+        raw = np.r_[np.full(8, 440.), np.full(100, 220.)]
+        np.testing.assert_array_equal(correct_octave_jumps(raw), raw)
+
     def test_doubling_and_halving_preserve_vibrato(self):
         time = np.arange(300) * 0.01
         clean = (220 * 2 ** (0.4 * np.sin(2 * np.pi * 5 * time) / 12)).astype(np.float32)
@@ -116,8 +152,11 @@ class PitchPipelineTests(unittest.TestCase):
 
     def pitch(self, enabled=False, shift=0, f0_range=None, override=None):
         report = {}
+        # Waveform evidence must agree with the known synthetic fundamental.
+        time = np.arange(450 * 160) / 16000
+        audio = np.sin(2 * np.pi * 220 * time).astype(np.float32)
         _, continuous = self.pipeline.get_f0(
-            "fixture", np.ones(450 * 160, dtype=np.float32), 450,
+            "fixture", audio, 450,
             shift, "rmvpe", 3, f0_range, override,
             correct_octave_errors=enabled, pitch_report=report,
         )

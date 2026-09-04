@@ -35,12 +35,99 @@ def _periodicity(audio, sample_rate, times, candidates):
     return scores
 
 
+def _supported_path(indices, pitches, proposed, scores, cuts, frame_seconds):
+    """Accept proposals against established notes, not transient low points.
+
+    Decisions are sequential: only previously accepted corrections may supply
+    context. A new stable note or a consonant gap requires fresh support, so a
+    single octave decision cannot silently set the rest of the phrase's octave.
+    """
+    accepted = np.full(len(indices), 2, dtype=np.int8)
+    accepted_quality = np.zeros(len(indices))
+    context = max(3, int(round(0.12 / frame_seconds)))
+    onset = max(1, int(round(0.04 / frame_seconds)))
+    settling = max(3, int(round(0.08 / frame_seconds)))
+    for phrase_start, phrase_stop in zip(cuts[:-1], cuts[1:]):
+        i = phrase_start
+        while i < phrase_stop:
+            state = proposed[i]
+            if state == 2:
+                i += 1
+                continue
+            end = i + 1
+            while end < phrase_stop and proposed[end] == state:
+                gap = (indices[end] - indices[end - 1] - 1) * frame_seconds
+                step = abs(pitches[end, 2] - pitches[end - 1, 2])
+                right = pitches[end:min(end + settling, phrase_stop), 2]
+                new_note = (step >= 3 and len(right) >= settling
+                            and np.ptp(right) <= 2)
+                if gap >= 0.03 or new_note:
+                    break
+                end += 1
+
+            reference = None
+            anchor_quality = 0.0
+            # A detector can briefly recover for one frame in a descending
+            # octave error. Resume the supported trajectory across <=40 ms;
+            # do not mistake that recovery for a new stable note/register.
+            if i > phrase_start and proposed[i - 1] == 2:
+                previous = i - 1
+                while (previous >= phrase_start and accepted[previous] == 2
+                       and (indices[i] - indices[previous]) * frame_seconds <= 0.04):
+                    previous -= 1
+                if (previous >= phrase_start and accepted[previous] == state
+                        and (indices[i] - indices[previous]) * frame_seconds <= 0.05
+                        and abs(pitches[i, state] - pitches[previous, state]) <= 3):
+                    reference = pitches[previous, state]
+                    anchor_quality = accepted_quality[previous]
+            for anchor_end in range(i, phrase_start + context - 1, -1):
+                if reference is not None:
+                    break
+                anchor_start = anchor_end - context
+                if (indices[i] - indices[anchor_start]) * frame_seconds > 0.35:
+                    break
+                frames = np.arange(anchor_start, anchor_end)
+                if np.any(np.diff(indices[frames]) > 1):
+                    continue
+                notes = pitches[frames, accepted[frames]]
+                if np.ptp(notes) > 2:
+                    continue
+                reference = np.median(notes)
+                if scores is not None:
+                    anchor_quality = np.median(scores[frames, accepted[frames]])
+                break
+
+            if reference is not None:
+                head = slice(i, min(i + onset, end))
+                raw_distance = abs(np.median(pitches[head, 2]) - reference)
+                new_distance = abs(np.median(pitches[head, state]) - reference)
+                acoustic_support = False
+                reliable = True
+                if scores is not None:
+                    raw_quality = np.median(scores[head, 2])
+                    new_quality = np.median(scores[head, state])
+                    reliable = (anchor_quality + new_quality) / 2 >= 0.6
+                    acoustic_support = new_quality - raw_quality >= 0.15
+                # Ordinary intervals through a fifth are valid unless there is
+                # positive acoustic evidence against the detected octave.
+                continuity_support = (raw_distance > 7.2
+                                      and raw_distance - new_distance >= 3)
+                if (reliable and new_distance <= 7.2
+                        and (continuity_support or acoustic_support)):
+                    accepted[i:end] = state
+                    accepted_quality[i:end] = anchor_quality
+            i = end
+    return accepted
+
+
 def correct_octave_jumps(f0, frame_seconds=0.01, *, audio=None, sample_rate=16000):
     """Choose an octave path across each phrase; do not flatten its melody.
 
     Candidates are the original F0 and shifts of one/two octaves, bounded to
     50–1100 Hz (the extraction range). Dynamic programming balances continuity,
-    source periodicity, and retaining the detector's octave. Notes on either
+    source periodicity, and retaining the detector's octave. Proposals require
+    stable preceding notes and reliable evidence; ambiguous transitions stay
+    unchanged. Notes on either
     side may differ, and an error may continue through a slide or phrase end.
     There is no maximum correction duration. Gaps up to 150 ms link context;
     longer gaps and invalid values reset it. Unvoiced values are never filled.
@@ -71,7 +158,8 @@ def correct_octave_jumps(f0, frame_seconds=0.01, *, audio=None, sample_rate=1600
     pitches = 12 * np.log2(candidates)
     allowed = (candidates >= 50) & (candidates <= 1100)
     allowed[:, 2] = True
-    emission = np.broadcast_to(0.015 * np.abs(shifts), candidates.shape).copy()
+    emission = np.broadcast_to(0.04 * np.abs(shifts), candidates.shape).copy()
+    scores = None
     if audio is not None and len(audio):
         scores = _periodicity(audio, sample_rate, indices * frame_seconds, candidates)
         best = np.max(np.where(allowed, scores, 0), axis=1, keepdims=True)
@@ -87,17 +175,19 @@ def correct_octave_jumps(f0, frame_seconds=0.01, *, audio=None, sample_rate=1600
     invalid_gap = invalid_prefix[indices[1:]] > invalid_prefix[indices[:-1] + 1]
     cuts = np.r_[0, np.flatnonzero((gaps * frame_seconds > 0.15) | invalid_gap) + 1, len(indices)]
     change_cost = 0.8 * np.abs(shifts[:, None] - shifts[None, :])
+    proposed = np.full(len(indices), 2, dtype=np.int8)
     for start, stop in zip(cuts[:-1], cuts[1:]):
         if stop - start < 2:
             continue
-        # A soft opening anchor favors the original register but still allows
-        # correction of a faulty onset when later context is stronger.
-        costs = emission[start] + 2.0 * np.abs(shifts)
+        # No prior stable note exists at a phrase opening. Start in the
+        # detector's register, matching the acceptance gate below.
+        costs = emission[start].copy()
+        costs[shifts != 0] = np.inf
         back = np.zeros((stop - start, len(shifts)), dtype=np.int8)
         for i in range(start + 1, stop):
             delta = np.abs(pitches[i][None, :] - pitches[i - 1][:, None])
             elapsed = (indices[i] - indices[i - 1]) * frame_seconds
-            allowance = 5.5 + min(2.0, max(0.0, elapsed - 0.01) * 12)
+            allowance = 7.2 + min(2.0, max(0.0, elapsed - 0.01) * 12)
             continuity = 0.3 * np.maximum(delta - allowance, 0) ** 2
             transitions = costs[:, None] + continuity + change_cost
             parent = np.argmin(transitions, axis=0)
@@ -105,8 +195,10 @@ def correct_octave_jumps(f0, frame_seconds=0.01, *, audio=None, sample_rate=1600
             costs = transitions[parent, np.arange(len(shifts))] + emission[i]
         state = int(np.argmin(costs))
         for i in range(stop - 1, start - 1, -1):
-            result[indices[i]] = values[indices[i]] * (2.0 ** shifts[state])
+            proposed[i] = state
             state = int(back[i - start, state])
+    accepted = _supported_path(indices, pitches, proposed, scores, cuts, frame_seconds)
+    result[indices] = values[indices] * (2.0 ** shifts[accepted])
     return result
 
 

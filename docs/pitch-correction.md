@@ -5,9 +5,9 @@ reduce pitch-doubling and halving errors. It works in ordinary, Guide Vocals,
 and batch conversion, and stays off by default for comparison and splicing.
 
 The correction considers the original detected pitch and alternatives one or
-two octaves above/below it. It chooses a continuous path across each phrase,
-using the source waveform's periodicity as supporting evidence and favoring the
-original detection when the alternatives are similarly plausible. Candidate
+two octaves above/below it. It proposes a continuous path across each phrase,
+then checks proposed shifts against stable preceding notes and the source
+waveform. It favors the original detection when alternatives are ambiguous. Candidate
 corrections stay within the detector's 50–1100 Hz range before transposition.
 
 Unlike the earlier brief-jump correction:
@@ -19,6 +19,25 @@ Unlike the earlier brief-jump correction:
   gaps with pitch. Longer gaps reset the phrase's register reference.
 - Waveform periodicity helps distinguish a strong overtone from a fundamental.
   It is evidence, not a guarantee: multiples of the true period can also fit.
+
+## Protecting ordinary melodic movement
+
+A low syllable ending or noisy attack must not pull the next valid note down an
+octave. Proposed shifts now need a stable preceding note: approximately 120 ms
+within a two-semitone span, found within the preceding 350 ms. Reflected padding,
+unvoiced gaps, and unaccepted proposals cannot establish this reference.
+
+Ordinary intervals through a perfect fifth are allowed without a continuity
+penalty. An octave shift must improve the interval substantially, or have clear
+support from the source waveform. When audio is supplied, the reference and
+proposed pitch must also provide sufficient periodicity evidence together.
+Weak or ambiguous waveform evidence leaves the detected pitch unchanged.
+
+The correction checks again at a new stable note or a consonant gap of 30 ms
+or more. A brief detector recovery of up to 40 ms inside an already supported
+slide can reconnect to that corrected trajectory. This avoids introducing a
+new jump when an octave error momentarily disappears during a descending note.
+Phrase openings retain the detector's register until stable context exists.
 
 Every change is an exact octave shift. Vibrato, detuning, and slides within the
 chosen octave remain intact. “Between different notes” does not mean snapping
@@ -58,3 +77,8 @@ Tests cover changing notes, descending phrase endings, sustained errors,
 vibrato, ordinary melodic intervals, slides, short and long gaps, waveform
 evidence, transposition, external F0 priority, and the disabled path. Guide
 Vocals regression tests remain part of the suite.
+
+Measured regression fixtures contain pitch and periodicity values, without
+waveform audio. They cover the original octave plateau and descending-tail
+errors, plus the valid melody after low syllable transitions and the ambiguous
+passage that the earlier correction incorrectly changed.

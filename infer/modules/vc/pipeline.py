@@ -18,6 +18,7 @@ import torch
 import torch.nn.functional as F
 import torchcrepe
 from scipy import signal
+from infer.modules.vc.guide import FEATURE_HOP, align_guide, guide_summary
 
 now_dir = os.getcwd()
 sys.path.append(now_dir)
@@ -270,6 +271,45 @@ class Pipeline(object):
         f0_coarse = np.rint(f0_mel).astype(np.int32)
         return f0_coarse, f0bak  # 1-0
 
+    def extract_content(self, model, audio, version):
+        # scipy.filtfilt can return a reversed-stride view before padding.
+        feats = torch.from_numpy(np.ascontiguousarray(audio))
+        feats = feats.half() if self.is_half else feats.float()
+        if feats.dim() == 2:
+            feats = feats.mean(-1)
+        assert feats.dim() == 1, feats.dim()
+        feats = feats.view(1, -1)
+        padding_mask = torch.BoolTensor(feats.shape).to(self.device).fill_(False)
+        with torch.no_grad():
+            logits = model.extract_features(
+                source=feats.to(self.device),
+                padding_mask=padding_mask,
+                output_layer=9 if version == "v1" else 12,
+            )
+            return model.final_proj(logits[0]) if version == "v1" else logits[0]
+
+    def track_content(self, model, audio, version):
+        """Extract full-track features using overlapping, bounded model inputs.
+
+        HuBERT's convolution has a 400-sample receptive field and 320-sample
+        stride. Integer frame boundaries plus context trimming preserve one
+        global timeline across chunks, including the final partial audio frame.
+        """
+        frame_count = (len(audio) - 400) // FEATURE_HOP + 1
+        chunk_frames = 1000  # 20 seconds plus one second of context on each side.
+        context = 50
+        chunks = []
+        for start in range(0, frame_count, chunk_frames):
+            end = min(start + chunk_frames, frame_count)
+            first = max(0, start - context)
+            last = min(frame_count, end + context)
+            sample_start = first * FEATURE_HOP
+            sample_end = (last - 1) * FEATURE_HOP + 400
+            feats = self.extract_content(model, audio[sample_start:sample_end], version)
+            chunks.append(feats[0, start - first:end - first].float().cpu().numpy())
+            logger.info("Guide feature extraction: %.1f / %.1f seconds", end / 50, frame_count / 50)
+        return np.concatenate(chunks)
+
     def vc(
         self,
         model,
@@ -284,43 +324,43 @@ class Pipeline(object):
         index_rate,
         version,
         protect,
+        aligned_guide=None,
+        chunk_start=0,
     ):  # ,file_index,file_big_npy
-        feats = torch.from_numpy(audio0)
-        if self.is_half:
-            feats = feats.half()
-        else:
-            feats = feats.float()
-        if feats.dim() == 2:  # double channels
-            feats = feats.mean(-1)
-        assert feats.dim() == 1, feats.dim()
-        feats = feats.view(1, -1)
-        padding_mask = torch.BoolTensor(feats.shape).to(self.device).fill_(False)
-
-        inputs = {
-            "source": feats.to(self.device),
-            "padding_mask": padding_mask,
-            "output_layer": 9 if version == "v1" else 12,
-        }
         t0 = ttime()
-        with torch.no_grad():
-            logits = model.extract_features(**inputs)
-            feats = model.final_proj(logits[0]) if version == "v1" else logits[0]
+        feats = self.extract_content(model, audio0, version)
         if protect < 0.5 and pitch is not None and pitchf is not None:
             feats0 = feats.clone()
+        retrieval_query = feats
+        if aligned_guide is not None:
+            guide_feats, guide_weights = aligned_guide.for_chunk(
+                chunk_start, self.t_pad, feats.shape[1]
+            )
+            guide_feats = torch.from_numpy(guide_feats).to(device=feats.device, dtype=feats.dtype)[None]
+            guide_weights = torch.from_numpy(guide_weights).to(device=feats.device, dtype=feats.dtype)[None, :, None]
+            retrieval_query = feats * (1 - guide_weights) + guide_feats * guide_weights
+            if aligned_guide.mode == "content":
+                feats = retrieval_query
         if (
             not isinstance(index, type(None))
             and not isinstance(big_npy, type(None))
             and index_rate != 0
         ):
-            npy = feats[0].cpu().numpy()
+            npy = retrieval_query[0].cpu().numpy()
             if self.is_half:
                 npy = npy.astype("float32")
 
             # _, I = index.search(npy, 1)
             # npy = big_npy[I.squeeze()]
 
-            score, ix = index.search(npy, k=8)
-            weight = np.square(1 / score)
+            score, ix = index.search(npy, k=min(8, index.ntotal))
+            # Exact self/guide matches have distance zero. Normalize distances
+            # without infinities so identical guides remain finite.
+            if np.any(score <= 0):
+                score = np.maximum(score, 1e-8)
+                weight = np.square(np.min(score, axis=1, keepdims=True) / score)
+            else:
+                weight = np.square(1 / score)
             weight /= weight.sum(axis=1, keepdims=True)
             npy = np.sum(big_npy[ix] * np.expand_dims(weight, axis=2), axis=1)
 
@@ -357,7 +397,7 @@ class Pipeline(object):
             arg = (feats, p_len, pitch, pitchf, sid) if hasp else (feats, p_len, sid)
             audio1 = (net_g.infer(*arg)[0][0, 0]).data.cpu().float().numpy()
             del hasp, arg
-        del feats, p_len, padding_mask
+        del feats, p_len
         if str(self.device).startswith("cuda"):
             torch.cuda.empty_cache()
         t2 = ttime()
@@ -386,6 +426,7 @@ class Pipeline(object):
         protect,
         f0_range=None,
         f0_file=None,
+        guide=None,
     ):
         if (
             file_index != ""
@@ -396,6 +437,8 @@ class Pipeline(object):
         ):
             try:
                 index = faiss.read_index(str(file_index))
+                if index.ntotal == 0:
+                    raise ValueError("The selected index is empty.")
                 # big_npy = np.load(file_big_npy)
                 big_npy = index.reconstruct_n(0, index.ntotal)
             except:
@@ -404,6 +447,22 @@ class Pipeline(object):
         else:
             index = big_npy = None
         audio = signal.filtfilt(bh, ah, audio)
+        aligned_guide = None
+        if guide is not None and guide.strength > 0:
+            guide.validate(audio)
+            if guide.mode == "retrieval" and (index is None or index_rate == 0 or index.ntotal == 0):
+                raise ValueError("Retrieval guidance needs a valid, nonempty index and index rate > 0.")
+            t_guide = ttime()
+            logger.info("Extracting original track content for guide alignment")
+            source_features = self.track_content(model, audio, version)
+            logger.info("Extracting guide track content")
+            guide_audio = signal.filtfilt(bh, ah, guide.audio)
+            guide_features = self.track_content(model, guide_audio, version)
+            logger.info("Aligning guide to original track")
+            aligned_guide = align_guide(source_features, guide_features, audio, guide)
+            del source_features, guide_features
+            times[0] += ttime() - t_guide
+            logger.info(guide_summary(guide.report))
         audio_pad = np.pad(audio, (self.window // 2, self.window // 2), mode="reflect")
         opt_ts = []
         if audio_pad.shape[0] > self.t_max:
@@ -478,6 +537,8 @@ class Pipeline(object):
                         index_rate,
                         version,
                         protect,
+                        aligned_guide,
+                        s,
                     )[self.t_pad_tgt : -self.t_pad_tgt]
                 )
             else:
@@ -495,6 +556,8 @@ class Pipeline(object):
                         index_rate,
                         version,
                         protect,
+                        aligned_guide,
+                        s,
                     )[self.t_pad_tgt : -self.t_pad_tgt]
                 )
             s = t
@@ -513,6 +576,8 @@ class Pipeline(object):
                     index_rate,
                     version,
                     protect,
+                    aligned_guide,
+                    t if t is not None else 0,
                 )[self.t_pad_tgt : -self.t_pad_tgt]
             )
         else:
@@ -530,6 +595,8 @@ class Pipeline(object):
                     index_rate,
                     version,
                     protect,
+                    aligned_guide,
+                    t if t is not None else 0,
                 )[self.t_pad_tgt : -self.t_pad_tgt]
             )
         audio_opt = np.concatenate(audio_opt)

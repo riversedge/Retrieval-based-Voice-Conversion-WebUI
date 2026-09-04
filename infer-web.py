@@ -985,6 +985,68 @@ with gr.Blocks(title="RVC WebUI") as app:
                             [vc_output1, vc_output2],
                             api_name="infer_convert",
                         )
+                with gr.Accordion("Guide Vocals", open=False):
+                    gr.Markdown(
+                        "Use another take of the same lyrics to guide pronunciation. "
+                        "The original supplies pitch; the selected RVC model supplies the voice. "
+                        "Full-length tracks are supported. Start with retrieval mode at 0.5, "
+                        "then compare with the ordinary conversion above. "
+                        "Use timing anchors if automatic alignment matches the wrong words."
+                    )
+                    with gr.Row():
+                        guide_upload0 = gr.Audio(label="Guide vocal (upload or record)", type="filepath")
+                        with gr.Column():
+                            guide_path0 = gr.Textbox(label="Guide audio path (or use upload)")
+                            guide_strength0 = gr.Slider(
+                                minimum=0, maximum=1, step=0.05, value=0.5,
+                                label="Pronunciation guidance strength (0 = ordinary RVC)",
+                            )
+                            guide_mode0 = gr.Radio(
+                                choices=["retrieval", "content"], value="retrieval",
+                                label="Guidance mode",
+                            )
+                    guide_upload0.change(
+                        lambda path: path or "", [guide_upload0], [guide_path0]
+                    )
+                    gr.Markdown(
+                        "**content** changes pronunciation features before the voice lookup. "
+                        "**retrieval** only steers the lookup and requires an index rate above zero. "
+                        "Consonant protection still applies; lower protection values can reduce "
+                        "the guide's effect on unvoiced consonants."
+                    )
+                    with gr.Row():
+                        guide_alignment0 = gr.Radio(
+                            choices=["auto", "linear"], value="auto",
+                            label="Alignment (auto follows the audio; linear matches overall duration)",
+                        )
+                        guide_start0 = gr.Number(value=0, label="Apply guide from source time (seconds)")
+                        guide_end0 = gr.Number(value=0, label="Apply guide until source time (0 = end)")
+                    guide_anchors0 = gr.Textbox(
+                        label="Optional timing anchors: source seconds, guide seconds (one pair per line)",
+                        placeholder="12.5,13.2\n18.0,19.1", lines=3,
+                    )
+                    gr.Markdown(
+                        "Anchors override automatic alignment with a gradual timing adjustment "
+                        "between each pair. Use times relative to the full input files. "
+                        "The application region limits where pronunciation changes; both tracks "
+                        "are still aligned in full. Keep the lyrics and verse order the same."
+                    )
+                    guide_button0 = gr.Button("Convert with guide", variant="primary")
+                    with gr.Row():
+                        guide_output1 = gr.Textbox(label="Guide conversion information")
+                        guide_output2 = gr.Audio(label="Guided output (compare with ordinary output above)")
+                    guide_button0.click(
+                        vc.vc_single,
+                        [
+                            spk_item, input_audio0, vc_transform0, f0_file, f0method0,
+                            file_index1, file_index2, index_rate1, filter_radius0,
+                            resample_sr0, rms_mix_rate0, protect0, f0_range0,
+                            guide_path0, guide_strength0, guide_mode0, guide_alignment0,
+                            guide_anchors0, guide_start0, guide_end0,
+                        ],
+                        [guide_output1, guide_output2],
+                        api_name="infer_convert_guided",
+                    )
             with gr.TabItem(i18n("批量推理")):
                 gr.Markdown(
                     value=i18n(

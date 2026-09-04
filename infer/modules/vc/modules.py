@@ -17,6 +17,7 @@ from infer.lib.infer_pack.models import (
     SynthesizerTrnMs768NSFsid_nono,
 )
 from infer.modules.vc.pipeline import Pipeline
+from infer.modules.vc.guide import GuideInput, guide_summary
 from infer.modules.vc.utils import *
 
 
@@ -159,6 +160,14 @@ class VC:
         rms_mix_rate,
         protect,
         f0_range=None,
+        guide_audio_path=None,
+        guide_strength=0.0,
+        guide_mode="retrieval",
+        guide_alignment="auto",
+        guide_anchors="",
+        guide_start=0.0,
+        guide_end=0.0,
+        guide_report=None,
     ):
         if input_audio_path is None:
             return "You need to upload an audio", None
@@ -168,6 +177,25 @@ class VC:
             audio_max = np.abs(audio).max() / 0.95
             if audio_max > 1:
                 audio /= audio_max
+            guide = None
+            if not np.isfinite(guide_strength) or not 0 <= guide_strength <= 1:
+                raise ValueError("Guide strength must be between 0 and 1.")
+            # Strength zero must not decode the guide, add extraction work, or
+            # change the existing batch/API inference path.
+            if guide_strength > 0:
+                if not guide_audio_path:
+                    raise ValueError("Provide a guide vocal, or set guide strength to zero.")
+                if not self.if_f0:
+                    raise ValueError("Guide conversion requires a pitch-enabled RVC model to retain the original melody.")
+                guide_audio = load_audio(str(guide_audio_path), 16000)
+                guide_max = np.max(np.abs(guide_audio)) / 0.95 if guide_audio.size else 0
+                if guide_max > 1:
+                    guide_audio /= guide_max
+                guide = GuideInput(
+                    guide_audio, float(guide_strength), guide_mode, guide_alignment,
+                    guide_anchors or "", float(guide_start), float(guide_end),
+                )
+                guide.validate(audio)
             times = [0, 0, 0]
 
             if self.hubert_model is None:
@@ -207,7 +235,12 @@ class VC:
                 protect,
                 f0_range,
                 f0_file,
+                guide=guide,
             )
+            if guide_report is not None:
+                guide_report.clear()
+                if guide is not None:
+                    guide_report.update(guide.report)
             if self.tgt_sr != resample_sr >= 16000:
                 tgt_sr = resample_sr
             else:
@@ -219,7 +252,8 @@ class VC:
             )
             return (
                 "Success.\n%s\nTime:\nnpy: %.2fs, f0: %.2fs, infer: %.2fs."
-                % (index_info, *times),
+                % (index_info, *times)
+                + ("\n" + guide_summary(guide.report) if guide is not None else ""),
                 (tgt_sr, audio_opt),
             )
         except:

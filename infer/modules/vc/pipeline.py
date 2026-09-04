@@ -19,7 +19,7 @@ import torch.nn.functional as F
 import torchcrepe
 from scipy import signal
 from infer.modules.vc.guide import FEATURE_HOP, align_guide, guide_summary
-from infer.modules.vc.pitch_correction import correct_octave_jumps
+from infer.modules.vc.pitch_fusion import fuse_pitch_estimates
 
 now_dir = os.getcwd()
 sys.path.append(now_dir)
@@ -154,6 +154,75 @@ class Pipeline(object):
         self.t_max = self.sr * self.x_max  # 免查询时长阈值
         self.device = config.device
 
+    def _fcpe_device(self):
+        device = str(self.device)
+        if "privateuseone" in device:
+            return "cpu"
+        if device.startswith("cuda") and not torch.cuda.is_available():
+            return "cpu"
+        if device.startswith("mps") and not torch.backends.mps.is_available():
+            return "cpu"
+        return device
+
+    def _load_fcpe(self, device):
+        if not hasattr(self, "model_fcpe") or self.model_fcpe_device != device:
+            from torchfcpe import spawn_bundled_infer_model
+
+            logger.info("Loading FCPE pitch model on %s", device)
+            self.model_fcpe = spawn_bundled_infer_model(device)
+            self.model_fcpe_device = device
+        return self.model_fcpe
+
+    def _infer_fcpe(self, audio, target_length, *, device=None):
+        """Extract FCPE over a full track using bounded overlapping chunks."""
+        if target_length <= 0:
+            return np.zeros(0, dtype=np.float32)
+        device = self._fcpe_device() if device is None else device
+        try:
+            model = self._load_fcpe(device)
+            result = np.zeros(target_length, dtype=np.float32)
+            chunk_frames = 2000
+            context_frames = 100
+            for start in range(0, target_length, chunk_frames):
+                stop = min(start + chunk_frames, target_length)
+                read_start = max(0, start - context_frames)
+                read_stop = min(target_length, stop + context_frames)
+                sample_start = read_start * self.window
+                sample_stop = min(len(audio), read_stop * self.window)
+                segment = np.asarray(audio[sample_start:sample_stop], dtype=np.float32)
+                required = (read_stop - read_start) * self.window
+                if len(segment) < required:
+                    segment = np.pad(segment, (0, required - len(segment)))
+                tensor = torch.from_numpy(np.ascontiguousarray(segment))[None, :, None].to(device)
+                with torch.no_grad():
+                    local_f0, unvoiced = model.infer(
+                        tensor,
+                        sr=self.sr,
+                        decoder_mode="local_argmax",
+                        threshold=.006,
+                        f0_min=50,
+                        f0_max=1100,
+                        interp_uv=False,
+                        output_interp_target_length=read_stop - read_start,
+                        retur_uv=True,
+                    )
+                local_f0 = local_f0.squeeze().float().cpu().numpy().reshape(-1)
+                unvoiced = unvoiced.squeeze().float().cpu().numpy().reshape(-1)
+                local_f0[(unvoiced >= .5) | ~np.isfinite(local_f0)] = 0
+                first = start - read_start
+                result[start:stop] = local_f0[first:first + stop - start]
+                logger.info("FCPE pitch extraction: %.1f / %.1f seconds",
+                            stop * self.window / self.sr,
+                            target_length * self.window / self.sr)
+            return result
+        except Exception:
+            if device != "cpu":
+                logger.warning("FCPE failed on %s; retrying on CPU", device, exc_info=True)
+                if hasattr(self, "model_fcpe"):
+                    del self.model_fcpe
+                return self._infer_fcpe(audio, target_length, device="cpu")
+            raise
+
     def get_f0(
         self,
         input_audio_path,
@@ -235,20 +304,36 @@ class Pipeline(object):
                 logger.info("Cleaning ortruntime memory")
 
         if correct_octave_errors and inp_f0 is None:
-            # Reflected model padding is not real musical context. Correct only
+            # Reflected model padding is not real musical context. Fuse only
             # the original timeline so its edges cannot acquire false anchors.
             pad_frames = self.t_pad // self.window
             stop = max(pad_frames, len(f0) - pad_frames)
+            source_audio = x[self.t_pad:len(x) - self.t_pad] if self.t_pad else x
+            fcpe = self._infer_fcpe(source_audio, stop - pad_frames)
             corrected = f0.copy()
-            corrected[pad_frames:stop] = correct_octave_jumps(
-                f0[pad_frames:stop], self.window / self.sr,
-                audio=x[self.t_pad:len(x) - self.t_pad] if self.t_pad else x,
+            corrected[pad_frames:stop], fusion_report = fuse_pitch_estimates(
+                f0[pad_frames:stop], fcpe, self.window / self.sr,
+                audio=source_audio,
                 sample_rate=self.sr,
             )
-            changed = int(np.count_nonzero(np.isfinite(f0) & (corrected != f0)))
-            logger.info("Octave jump correction: %d frames (%.3f seconds)", changed, changed * self.window / self.sr)
+            changed = fusion_report.corrected_frames
+            logger.info(
+                "Pitch fusion: %d agreement, %d FCPE recovery, %d bridge, "
+                "%d octave-corrected frames",
+                fusion_report.agreement_frames,
+                fusion_report.fcpe_recovered_frames,
+                fusion_report.bridged_frames,
+                fusion_report.octave_corrected_frames,
+            )
             if pitch_report is not None:
-                pitch_report.update(corrected_frames=changed, corrected_seconds=changed * self.window / self.sr)
+                pitch_report.update(
+                    agreement_frames=fusion_report.agreement_frames,
+                    fcpe_recovered_frames=fusion_report.fcpe_recovered_frames,
+                    bridged_frames=fusion_report.bridged_frames,
+                    octave_corrected_frames=fusion_report.octave_corrected_frames,
+                    corrected_frames=changed,
+                    corrected_seconds=changed * self.window / self.sr,
+                )
             f0 = corrected
         elif correct_octave_errors and pitch_report is not None:
             pitch_report["skipped"] = "supplied F0 curve"

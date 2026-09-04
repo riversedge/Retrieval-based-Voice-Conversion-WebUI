@@ -261,9 +261,14 @@ class VC:
                 elif pitch_report.get("skipped"):
                     pitch_info = "\nOctave correction skipped: supplied F0 curve."
                 else:
-                    pitch_info = "\nOctave correction: %d frames (%.3fs) adjusted." % (
+                    pitch_info = (
+                        "\nPitch correction: %d frames (%.3fs) adjusted; "
+                        "%d recovered by FCPE, %d bridged."
+                    ) % (
                         pitch_report.get("corrected_frames", 0),
                         pitch_report.get("corrected_seconds", 0.0),
+                        pitch_report.get("fcpe_recovered_frames", 0),
+                        pitch_report.get("bridged_frames", 0),
                     )
             return (
                 "Success.\n%s\nTime:\nnpy: %.2fs, f0: %.2fs, infer: %.2fs."

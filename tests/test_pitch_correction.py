@@ -2,11 +2,12 @@ import unittest
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import numpy as np
 
 from infer.modules.vc.pitch_correction import correct_octave_jumps, _periodicity, _supported_path
+from infer.modules.vc.pitch_fusion import PitchFusionReport
 from infer.modules.vc.pipeline import Pipeline
 
 
@@ -202,6 +203,9 @@ class PitchPipelineTests(unittest.TestCase):
         self.raw = np.full(450, 220.0, dtype=np.float32)
         self.raw[180:215] = 440
         self.pipeline.model_rmvpe = SimpleNamespace(infer_from_audio=lambda *a, **kw: self.raw.copy())
+        self.pipeline._infer_fcpe = Mock(
+            return_value=np.full(250, 220.0, dtype=np.float32)
+        )
 
     def pitch(self, enabled=False, shift=0, f0_range=None, override=None):
         report = {}
@@ -222,6 +226,7 @@ class PitchPipelineTests(unittest.TestCase):
         on, report = self.pitch(True)
         np.testing.assert_array_equal(on, np.full(450, 220.0))
         self.assertEqual(report["corrected_frames"], 35)
+        self.assertEqual(report["octave_corrected_frames"], 35)
 
     def test_pitch_shift_and_range_still_apply_after_repair(self):
         shifted, _ = self.pitch(True, shift=-12)
@@ -231,19 +236,25 @@ class PitchPipelineTests(unittest.TestCase):
 
     def test_external_curve_is_authoritative(self):
         supplied = np.array([[0, 330], [1, 330]], dtype=np.float32)
-        with patch("infer.modules.vc.pipeline.correct_octave_jumps") as correction:
+        with patch("infer.modules.vc.pipeline.fuse_pitch_estimates") as correction:
             curve, report = self.pitch(True, override=supplied)
         correction.assert_not_called()
+        self.pipeline._infer_fcpe.assert_not_called()
         self.assertEqual(report["skipped"], "supplied F0 curve")
         np.testing.assert_array_equal(curve[100:201], np.full(101, 330.0))
 
     def test_reflected_padding_is_excluded_from_pitch_and_audio(self):
-        with patch("infer.modules.vc.pipeline.correct_octave_jumps", side_effect=lambda f, *a, **kw: f.copy()) as correction:
+        report = PitchFusionReport(0, 0, 0, 0, 0)
+        with patch("infer.modules.vc.pipeline.fuse_pitch_estimates",
+                   side_effect=lambda f, *a, **kw: (f.copy(), report)) as correction:
             self.pitch(True)
         args, kwargs = correction.call_args
         np.testing.assert_array_equal(args[0], self.raw[100:-100])
         self.assertEqual(len(kwargs['audio']), 250 * 160)
         self.assertEqual(kwargs['sample_rate'], 16000)
+        fcpe_args = self.pipeline._infer_fcpe.call_args.args
+        self.assertEqual(len(fcpe_args[0]), 250 * 160)
+        self.assertEqual(fcpe_args[1], 250)
 
 
 if __name__ == "__main__":

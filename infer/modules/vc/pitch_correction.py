@@ -67,6 +67,7 @@ def _supported_path(indices, pitches, proposed, scores, cuts, frame_seconds):
 
             reference = None
             anchor_quality = 0.0
+            continuation = False
             # A detector can briefly recover for one frame in a descending
             # octave error. Resume the supported trajectory across <=40 ms;
             # do not mistake that recovery for a new stable note/register.
@@ -80,6 +81,7 @@ def _supported_path(indices, pitches, proposed, scores, cuts, frame_seconds):
                         and abs(pitches[i, state] - pitches[previous, state]) <= 3):
                     reference = pitches[previous, state]
                     anchor_quality = accepted_quality[previous]
+                    continuation = True
             for anchor_end in range(i, phrase_start + context - 1, -1):
                 if reference is not None:
                     break
@@ -106,14 +108,41 @@ def _supported_path(indices, pitches, proposed, scores, cuts, frame_seconds):
                 if scores is not None:
                     raw_quality = np.median(scores[head, 2])
                     new_quality = np.median(scores[head, state])
-                    reliable = (anchor_quality + new_quality) / 2 >= 0.6
+                    # A trustworthy preceding note cannot compensate for a
+                    # candidate pitch with weak waveform support. Once an
+                    # episode is established, brief recoveries reuse that
+                    # decision instead of rejudging each noisy frame.
+                    reliable = (continuation or (new_quality >= 0.55
+                                and (anchor_quality + new_quality) / 2 >= 0.6))
                     acoustic_support = new_quality - raw_quality >= 0.15
                 # Ordinary intervals through a fifth are valid unless there is
                 # positive acoustic evidence against the detected octave.
                 continuity_support = (raw_distance > 7.2
                                       and raw_distance - new_distance >= 3)
+                following_supports_original = False
+                # Look ahead only to independently unmodified stable notes.
+                # Comparing two proposed shifts would be circular evidence.
+                for next_start in range(end, phrase_stop - context + 1):
+                    next_end = next_start + context
+                    if (indices[next_end - 1] - indices[end - 1]) * frame_seconds > 0.35:
+                        break
+                    frames = np.arange(next_start, next_end)
+                    if (np.any(proposed[frames] != 2)
+                            or np.any(np.diff(indices[frames]) > 1)
+                            or np.ptp(pitches[frames, 2]) > 2):
+                        continue
+                    if scores is not None and np.median(scores[frames, 2]) < 0.65:
+                        continue
+                    following = np.median(pitches[frames, 2])
+                    tail = slice(max(i, end - settling), end)
+                    raw_exit = abs(np.median(pitches[tail, 2]) - following)
+                    new_exit = abs(np.median(pitches[tail, state]) - following)
+                    following_supports_original = (raw_exit <= 7.2
+                                                   and new_exit - raw_exit >= 3)
+                    break
                 if (reliable and new_distance <= 7.2
-                        and (continuity_support or acoustic_support)):
+                        and (continuity_support or acoustic_support)
+                        and (not following_supports_original or acoustic_support)):
                     accepted[i:end] = state
                     accepted_quality[i:end] = anchor_quality
             i = end

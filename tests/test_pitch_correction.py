@@ -6,13 +6,20 @@ from unittest.mock import patch
 
 import numpy as np
 
-from infer.modules.vc.pitch_correction import correct_octave_jumps, _periodicity
+from infer.modules.vc.pitch_correction import correct_octave_jumps, _periodicity, _supported_path
 from infer.modules.vc.pipeline import Pipeline
 
 
 class OctaveContinuityTests(unittest.TestCase):
     def test_measured_true_errors_and_false_correction_regressions(self):
         fixture = json.loads((Path(__file__).parent / "fixtures/octave_transitions.json").read_text())
+        self.check_measured_cases(fixture)
+
+    def test_full_track_detector_recoveries_and_real_note_transitions(self):
+        fixture = json.loads((Path(__file__).parent / "fixtures/full_track_octave_transitions.json").read_text())
+        self.check_measured_cases(fixture)
+
+    def check_measured_cases(self, fixture):
         for case in fixture["cases"]:
             with self.subTest(case=case["name"]):
                 raw = np.array(case["f0_hz"])
@@ -23,6 +30,52 @@ class OctaveContinuityTests(unittest.TestCase):
                     fixed = correct_octave_jumps(raw, audio=np.zeros(len(raw) * 160))
                 for start, stop, factor in case["checks"]:
                     np.testing.assert_array_equal(fixed[start:stop], raw[start:stop] * factor)
+
+    def test_repeated_recoveries_keep_the_supported_descending_trajectory(self):
+        clean = np.r_[np.full(50, 480.), np.linspace(470, 250, 40)]
+        raw = clean.copy()
+        raw[50:] *= 2
+        raw[[54, 56]] = clean[[54, 56]]
+        scores = np.zeros((len(raw), 5))
+        scores[:50, 2] = .95
+        scores[50:, 1] = .2  # Weak later evidence must not fragment the episode.
+        scores[50:54, 1] = .8
+        scores[[54, 56], 2] = .9
+        with patch("infer.modules.vc.pitch_correction._periodicity", return_value=scores):
+            fixed = correct_octave_jumps(raw, audio=np.zeros(len(raw) * 160))
+        np.testing.assert_array_equal(fixed, clean)
+
+    def test_candidate_cannot_borrow_all_confidence_from_preceding_note(self):
+        raw = np.r_[np.full(50, 220.), np.full(30, 440.), np.full(30, 220.)]
+        scores = np.zeros((len(raw), 5))
+        scores[:, 2] = .95
+        scores[50:80, 2] = .45
+        scores[50:80, 1] = .4
+        with patch("infer.modules.vc.pitch_correction._periodicity", return_value=scores):
+            fixed = correct_octave_jumps(raw, audio=np.zeros(len(raw) * 160))
+        np.testing.assert_array_equal(fixed, raw)
+
+    def test_longer_recovery_requires_fresh_evidence(self):
+        raw = np.r_[np.full(50, 480.), np.full(4, 940.),
+                    np.full(6, 420.), np.full(20, 760.)]
+        scores = np.zeros((len(raw), 5))
+        scores[:50, 2] = .95
+        scores[50:54, 1] = .8
+        scores[54:60, 2] = .9
+        scores[60:, 1] = .2
+        with patch("infer.modules.vc.pitch_correction._periodicity", return_value=scores):
+            fixed = correct_octave_jumps(raw, audio=np.zeros(len(raw) * 160))
+        np.testing.assert_array_equal(fixed[50:54], raw[50:54] / 2)
+        np.testing.assert_array_equal(fixed[54:], raw[54:])
+
+    def test_following_stable_note_vetoes_a_smooth_but_wrong_proposal(self):
+        raw = np.r_[np.full(40, 110.), np.full(30, 220.), np.full(30, 220.)]
+        pitches = 12 * np.log2(raw[:, None] * 2. ** np.arange(-2, 3))
+        proposed = np.full(len(raw), 2, dtype=np.int8)
+        proposed[40:70] = 1
+        accepted = _supported_path(np.arange(len(raw)), pitches, proposed,
+                                   np.full(pitches.shape, .9), [0, len(raw)], .01)
+        np.testing.assert_array_equal(accepted, np.full(len(raw), 2))
 
     def test_thirds_fourths_and_fifths_remain_melodic_choices(self):
         for interval in (3, 4, 5, 7):

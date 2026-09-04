@@ -31,12 +31,23 @@ Ordinary intervals through a perfect fifth are allowed without a continuity
 penalty. An octave shift must improve the interval substantially, or have clear
 support from the source waveform. When audio is supplied, the reference and
 proposed pitch must also provide sufficient periodicity evidence together.
-Weak or ambiguous waveform evidence leaves the detected pitch unchanged.
+A new candidate must meet its own minimum evidence threshold: a strong
+preceding note cannot compensate for a weak candidate. Weak or ambiguous
+waveform evidence leaves the detected pitch unchanged.
+
+The check also looks ahead for an independently unmodified stable note within
+350 ms. If the original pitch fits that following note substantially better,
+the correction is rejected unless there is positive acoustic evidence for the
+shift. Proposed corrections are not used as future references.
 
 The correction checks again at a new stable note or a consonant gap of 30 ms
-or more. A brief detector recovery of up to 40 ms inside an already supported
-slide can reconnect to that corrected trajectory. This avoids introducing a
-new jump when an octave error momentarily disappears during a descending note.
+or more. Repeated brief detector recoveries of up to 40 ms inside an already
+supported slide can reconnect to that corrected trajectory. They share the
+initial correction decision instead of requiring fresh acoustic confidence for
+each noisy recovery. Recovered frames keep their original pitch; they are not
+shifted a second time. Gaps longer than this recovery window do not inherit the
+episode decision. This avoids introducing a new jump when an octave error
+momentarily disappears during a descending note.
 Phrase openings retain the detector's register until stable context exists.
 
 Every change is an exact octave shift. Vibrato, detuning, and slides within the
@@ -79,6 +90,8 @@ evidence, transposition, external F0 priority, and the disabled path. Guide
 Vocals regression tests remain part of the suite.
 
 Measured regression fixtures contain pitch and periodicity values, without
-waveform audio. They cover the original octave plateau and descending-tail
+waveform audio. Full-track fixtures use the exact F0 captured from the conversion
+pipeline, since extracting short clips can change RMVPE's decisions at difficult
+frames. They cover the original octave plateau and descending-tail
 errors, plus the valid melody after low syllable transitions and the ambiguous
 passage that the earlier correction incorrectly changed.

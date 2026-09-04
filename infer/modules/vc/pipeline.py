@@ -19,6 +19,7 @@ import torch.nn.functional as F
 import torchcrepe
 from scipy import signal
 from infer.modules.vc.guide import FEATURE_HOP, align_guide, guide_summary
+from infer.modules.vc.pitch_correction import correct_brief_octave_jumps
 
 now_dir = os.getcwd()
 sys.path.append(now_dir)
@@ -163,6 +164,8 @@ class Pipeline(object):
         filter_radius,
         f0_range=None,
         inp_f0=None,
+        correct_octave_errors=False,
+        pitch_report=None,
     ):
         global input_audio_path2wav
         time_step = self.window / self.sr * 1000
@@ -231,6 +234,22 @@ class Pipeline(object):
                 del self.model_rmvpe
                 logger.info("Cleaning ortruntime memory")
 
+        if correct_octave_errors and inp_f0 is None:
+            # Reflected model padding is not real musical context. Correct only
+            # the original timeline so its edges cannot acquire false anchors.
+            pad_frames = self.t_pad // self.window
+            stop = max(pad_frames, len(f0) - pad_frames)
+            corrected = f0.copy()
+            corrected[pad_frames:stop] = correct_brief_octave_jumps(
+                f0[pad_frames:stop], self.window / self.sr
+            )
+            changed = int(np.count_nonzero(np.isfinite(f0) & (corrected != f0)))
+            logger.info("Octave jump correction: %d frames (%.3f seconds)", changed, changed * self.window / self.sr)
+            if pitch_report is not None:
+                pitch_report.update(corrected_frames=changed, corrected_seconds=changed * self.window / self.sr)
+            f0 = corrected
+        elif correct_octave_errors and pitch_report is not None:
+            pitch_report["skipped"] = "supplied F0 curve"
         f0 *= pow(2, f0_up_key / 12)
         # with open("test.txt","w")as f:f.write("\n".join([str(i)for i in f0.tolist()]))
         tf0 = self.sr // self.window  # 每秒f0点数
@@ -427,6 +446,8 @@ class Pipeline(object):
         f0_range=None,
         f0_file=None,
         guide=None,
+        correct_octave_errors=False,
+        pitch_report=None,
     ):
         if (
             file_index != ""
@@ -511,6 +532,8 @@ class Pipeline(object):
                 filter_radius,
                 f0_range,
                 inp_f0,
+                correct_octave_errors=correct_octave_errors,
+                pitch_report=pitch_report,
             )
             pitch = pitch[:p_len]
             pitchf = pitchf[:p_len]

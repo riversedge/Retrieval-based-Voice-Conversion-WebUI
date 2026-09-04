@@ -168,6 +168,7 @@ class VC:
         guide_start=0.0,
         guide_end=0.0,
         guide_report=None,
+        correct_octave_errors=False,
     ):
         if input_audio_path is None:
             return "You need to upload an audio", None
@@ -197,6 +198,7 @@ class VC:
                 )
                 guide.validate(audio)
             times = [0, 0, 0]
+            pitch_report = {}
 
             if self.hubert_model is None:
                 self.hubert_model = load_hubert(self.config)
@@ -236,6 +238,8 @@ class VC:
                 f0_range,
                 f0_file,
                 guide=guide,
+                correct_octave_errors=correct_octave_errors,
+                pitch_report=pitch_report,
             )
             if guide_report is not None:
                 guide_report.clear()
@@ -250,9 +254,21 @@ class VC:
                 if os.path.exists(file_index)
                 else "Index not used."
             )
+            pitch_info = ""
+            if correct_octave_errors:
+                if not self.if_f0:
+                    pitch_info = "\nOctave correction skipped: model does not use pitch."
+                elif pitch_report.get("skipped"):
+                    pitch_info = "\nOctave correction skipped: supplied F0 curve."
+                else:
+                    pitch_info = "\nOctave correction: %d frames (%.3fs) adjusted." % (
+                        pitch_report.get("corrected_frames", 0),
+                        pitch_report.get("corrected_seconds", 0.0),
+                    )
             return (
                 "Success.\n%s\nTime:\nnpy: %.2fs, f0: %.2fs, infer: %.2fs."
                 % (index_info, *times)
+                + pitch_info
                 + ("\n" + guide_summary(guide.report) if guide is not None else ""),
                 (tgt_sr, audio_opt),
             )
@@ -278,6 +294,7 @@ class VC:
         protect,
         format1,
         f0_range=None,
+        correct_octave_errors=False,
     ):
         try:
             dir_path = (
@@ -312,6 +329,7 @@ class VC:
                     rms_mix_rate,
                     protect,
                     f0_range,
+                    correct_octave_errors=correct_octave_errors,
                 )
                 if "Success" in info:
                     try:

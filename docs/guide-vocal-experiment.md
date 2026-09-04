@@ -1,6 +1,9 @@
 # Guide Vocals
 
-Branch: `guide-vocal-experiment`.
+Available on `main`; originally developed on `guide-vocal-experiment`.
+
+For optional correction of the original's detected pitch, see
+[Correct brief octave jumps](pitch-correction.md).
 
 Use a second take to influence pronunciation while the original supplies pitch
 and the selected RVC model supplies the output voice. No retraining or new model

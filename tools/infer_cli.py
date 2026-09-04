@@ -44,6 +44,10 @@ def arg_parse() -> tuple:
         help="optional f0 range like 'E2 - B4' or '80-400Hz'",
     )
     parser.add_argument("--guide_path", help="optional guide vocal with the same lyrics/verse order")
+    parser.add_argument(
+        "--correct_octave_errors", action="store_true",
+        help="repair brief pitch-doubling/halving excursions using surrounding voiced notes",
+    )
     parser.add_argument("--guide_strength", type=float, default=0.5)
     parser.add_argument("--guide_mode", choices=["retrieval", "content"], default="retrieval")
     parser.add_argument("--guide_alignment", choices=["auto", "linear"], default="auto")
@@ -105,6 +109,7 @@ def main():
             args.resample_sr, args.rms_mix_rate, args.protect, args.f0_range,
             args.guide_path, strength, mode, args.guide_alignment, anchors,
             args.guide_start, args.guide_end, guide_report=report,
+            correct_octave_errors=args.correct_octave_errors,
         )
         if wav_opt is None or wav_opt[0] is None:
             raise RuntimeError(info)

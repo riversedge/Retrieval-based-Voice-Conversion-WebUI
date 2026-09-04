@@ -818,6 +818,43 @@ def change_f0_method(f0method8):
     return {"visible": visible, "__type__": "update"}
 
 
+def convert_with_octave_option(
+    sid, input_audio_path, f0_up_key, f0_file, f0_method, file_index,
+    file_index2, index_rate, filter_radius, resample_sr, rms_mix_rate,
+    protect, f0_range=None, correct_octave_errors=False,
+):
+    # Append the checkbox to the existing UI/API inputs without shifting the
+    # positional guide arguments in VC.vc_single's Python interface.
+    return vc.vc_single(
+        sid, input_audio_path, f0_up_key, f0_file, f0_method, file_index,
+        file_index2, index_rate, filter_radius, resample_sr, rms_mix_rate,
+        protect, f0_range, correct_octave_errors=correct_octave_errors,
+    )
+
+
+def convert_guided_with_octave_option(
+    sid, input_audio_path, f0_up_key, f0_file, f0_method, file_index,
+    file_index2, index_rate, filter_radius, resample_sr, rms_mix_rate,
+    protect, f0_range=None, guide_audio_path=None, guide_strength=0.0,
+    guide_mode="retrieval", guide_alignment="auto", guide_anchors="",
+    guide_start=0.0, guide_end=0.0, correct_octave_errors=False,
+):
+    return vc.vc_single(
+        sid, input_audio_path, f0_up_key, f0_file, f0_method, file_index,
+        file_index2, index_rate, filter_radius, resample_sr, rms_mix_rate,
+        protect, f0_range, guide_audio_path, guide_strength, guide_mode,
+        guide_alignment, guide_anchors, guide_start, guide_end,
+        correct_octave_errors=correct_octave_errors,
+    )
+
+
+OCTAVE_CORRECTION_HELP = (
+    "Reduce brief pitch-doubling or halving errors using nearby voiced notes. "
+    "Works with or without a pitch range. May also change intentional short "
+    "octave leaps; supplied F0 curves are left unchanged."
+)
+
+
 with gr.Blocks(title="RVC WebUI") as app:
     gr.Markdown("## RVC WebUI")
     gr.Markdown(
@@ -890,6 +927,10 @@ with gr.Blocks(title="RVC WebUI") as app:
                                 ),
                                 placeholder="E2 - B4",
                                 interactive=True,
+                            )
+                            correct_octaves0 = gr.Checkbox(
+                                label="Correct brief octave jumps",
+                                value=False, info=OCTAVE_CORRECTION_HELP,
                             )
 
                         with gr.Column():
@@ -965,7 +1006,7 @@ with gr.Blocks(title="RVC WebUI") as app:
                             )
 
                         but0.click(
-                            vc.vc_single,
+                            convert_with_octave_option,
                             [
                                 spk_item,
                                 input_audio0,
@@ -981,6 +1022,7 @@ with gr.Blocks(title="RVC WebUI") as app:
                                 rms_mix_rate0,
                                 protect0,
                                 f0_range0,
+                                correct_octaves0,
                             ],
                             [vc_output1, vc_output2],
                             api_name="infer_convert",
@@ -1036,13 +1078,14 @@ with gr.Blocks(title="RVC WebUI") as app:
                         guide_output1 = gr.Textbox(label="Guide conversion information")
                         guide_output2 = gr.Audio(label="Guided output (compare with ordinary output above)")
                     guide_button0.click(
-                        vc.vc_single,
+                        convert_guided_with_octave_option,
                         [
                             spk_item, input_audio0, vc_transform0, f0_file, f0method0,
                             file_index1, file_index2, index_rate1, filter_radius0,
                             resample_sr0, rms_mix_rate0, protect0, f0_range0,
                             guide_path0, guide_strength0, guide_mode0, guide_alignment0,
                             guide_anchors0, guide_start0, guide_end0,
+                            correct_octaves0,
                         ],
                         [guide_output1, guide_output2],
                         api_name="infer_convert_guided",
@@ -1090,6 +1133,10 @@ with gr.Blocks(title="RVC WebUI") as app:
                             ),
                             placeholder="E2 - B4",
                             interactive=True,
+                        )
+                        correct_octaves1 = gr.Checkbox(
+                            label="Correct brief octave jumps",
+                            value=False, info=OCTAVE_CORRECTION_HELP,
                         )
                         format1 = gr.Radio(
                             label=i18n("导出文件格式"),
@@ -1190,6 +1237,7 @@ with gr.Blocks(title="RVC WebUI") as app:
                             protect1,
                             format1,
                             f0_range1,
+                            correct_octaves1,
                         ],
                         [vc_output3],
                         api_name="infer_convert_batch",

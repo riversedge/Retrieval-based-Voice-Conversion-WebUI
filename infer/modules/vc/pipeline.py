@@ -19,7 +19,7 @@ import torch.nn.functional as F
 import torchcrepe
 from scipy import signal
 from infer.modules.vc.guide import FEATURE_HOP, align_guide, guide_summary
-from infer.modules.vc.pitch_correction import correct_brief_octave_jumps
+from infer.modules.vc.pitch_correction import correct_octave_jumps
 
 now_dir = os.getcwd()
 sys.path.append(now_dir)
@@ -240,8 +240,10 @@ class Pipeline(object):
             pad_frames = self.t_pad // self.window
             stop = max(pad_frames, len(f0) - pad_frames)
             corrected = f0.copy()
-            corrected[pad_frames:stop] = correct_brief_octave_jumps(
-                f0[pad_frames:stop], self.window / self.sr
+            corrected[pad_frames:stop] = correct_octave_jumps(
+                f0[pad_frames:stop], self.window / self.sr,
+                audio=x[self.t_pad:len(x) - self.t_pad] if self.t_pad else x,
+                sample_rate=self.sr,
             )
             changed = int(np.count_nonzero(np.isfinite(f0) & (corrected != f0)))
             logger.info("Octave jump correction: %d frames (%.3f seconds)", changed, changed * self.window / self.sr)

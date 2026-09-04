@@ -46,7 +46,7 @@ def arg_parse() -> tuple:
     parser.add_argument("--guide_path", help="optional guide vocal with the same lyrics/verse order")
     parser.add_argument(
         "--correct_octave_errors", action="store_true",
-        help="repair brief pitch-doubling/halving excursions using surrounding voiced notes",
+        help="correct octave errors across notes using phrase continuity and source periodicity",
     )
     parser.add_argument("--guide_strength", type=float, default=0.5)
     parser.add_argument("--guide_mode", choices=["retrieval", "content"], default="retrieval")

@@ -849,9 +849,10 @@ def convert_guided_with_octave_option(
 
 
 OCTAVE_CORRECTION_HELP = (
-    "Reduce brief pitch-doubling or halving errors using nearby voiced notes. "
-    "Works with or without a pitch range. May also change intentional short "
-    "octave leaps; supplied F0 curves are left unchanged."
+    "Reduce pitch-doubling or halving errors across changing notes and phrase "
+    "endings using continuity and the source audio. Works with or without a "
+    "pitch range. May alter intentional large leaps; compare with it off. "
+    "Supplied F0 curves are left unchanged."
 )
 
 
@@ -929,7 +930,7 @@ with gr.Blocks(title="RVC WebUI") as app:
                                 interactive=True,
                             )
                             correct_octaves0 = gr.Checkbox(
-                                label="Correct brief octave jumps",
+                                label="Correct octave / overtone errors",
                                 value=False, info=OCTAVE_CORRECTION_HELP,
                             )
 
@@ -1135,7 +1136,7 @@ with gr.Blocks(title="RVC WebUI") as app:
                             interactive=True,
                         )
                         correct_octaves1 = gr.Checkbox(
-                            label="Correct brief octave jumps",
+                            label="Correct octave / overtone errors",
                             value=False, info=OCTAVE_CORRECTION_HELP,
                         )
                         format1 = gr.Radio(

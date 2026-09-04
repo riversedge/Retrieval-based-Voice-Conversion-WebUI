@@ -1,51 +1,60 @@
-# Correct brief octave jumps
+# Correct octave / overtone errors
 
-Enable **Correct brief octave jumps**, next to the pitch-range field, to reduce
-short pitch-doubling or halving errors. The option is available for ordinary,
-Guide Vocals, and batch conversion. It is off by default.
+Enable **Correct octave / overtone errors**, next to the pitch-range field, to
+reduce pitch-doubling and halving errors. It works in ordinary, Guide Vocals,
+and batch conversion, and stays off by default for comparison and splicing.
 
-The detector may briefly report 440 Hz while surrounding notes are near 220 Hz,
-or drop to 110 Hz. When voiced context on both sides agrees, the correction moves
-the suspect section by exactly one octave. It retains the section's vibrato and
-small pitch variations instead of replacing it with a flat note.
+The correction considers the original detected pitch and alternatives one or
+two octaves above/below it. It chooses a continuous path across each phrase,
+using the source waveform's periodicity as supporting evidence and favoring the
+original detection when the alternatives are similarly plausible. Candidate
+corrections stay within the detector's 50–1100 Hz range before transposition.
 
-The initial conservative settings are:
+Unlike the earlier brief-jump correction:
 
-- A suspect excursion lasts at most **250 ms**.
-- Its entry and exit are approximately one octave, within two semitones.
-- There is at least **50 ms of voiced context on both sides**, examining up to
-  120 ms per side. Neighboring pitches must be stable and in a similar register.
-- After shifting by one octave, the section must fit the neighboring pitches.
+- There is **no 250 ms limit** and no requirement to return to the starting note.
+- The surrounding notes can differ; errors can span changing notes, slides, and
+  phrase endings.
+- Short unvoiced gaps (up to 150 ms) can connect context, without filling those
+  gaps with pitch. Longer gaps reset the phrase's register reference.
+- Waveform periodicity helps distinguish a strong overtone from a fundamental.
+  It is evidence, not a guarantee: multiples of the true period can also fit.
 
-No pitch range is required. The correction runs after detection, before the
-existing transposition and pitch-range adjustment. Those controls still work
-normally. In Guide Vocals, it corrects the original performance's detected F0;
+Every change is an exact octave shift. Vibrato, detuning, and slides within the
+chosen octave remain intact. “Between different notes” does not mean snapping
+notes to a key or correcting arbitrary intervals: this feature selects octaves
+of the detected notes. It does not repair every harmony or synthesis artifact.
+
+The option deliberately favors continuity over large abrupt leaps and **may
+change intentional melody jumps**, including sustained ones. Run with it on and
+off when choosing takes. A whole phrase detected in the wrong octave can still
+be ambiguous without a reliable register reference.
+
+No pitch range is required. Correction runs after pitch extraction and before
+transposition and the existing range adjustment. For example, a mistaken 900 Hz
+detection can first become 450 Hz, then become 225 Hz with a -12 semitone shift.
+In Guide Vocals the source performance provides this pitch and waveform evidence;
 the guide continues to control pronunciation.
 
-The conversion information reports how many frames/seconds were adjusted.
-Reflected model padding does not count as musical context. Unvoiced gaps are not
-filled, and supplied external F0 curves bypass the correction. Models without
-pitch conditioning report that the correction was skipped.
-
-This is a continuity heuristic, not a harmony recognizer or automatic tuning to
-a scale. It deliberately leaves sustained wrong-register passages, gradual
-slides, non-octave errors, and ambiguous phrase boundaries alone. A genuinely
-intended short octave leap can look identical to a detector error and may be
-changed; disable the option if it alters the melody.
+The conversion information reports adjusted frames and seconds. Reflected model
+padding is excluded from both pitch context and waveform evidence. Supplied
+external F0 curves bypass correction, and models without pitch conditioning
+report that it was skipped. Turning the option off bypasses the new analysis.
+The source-waveform analysis runs in bounded batches; full-length tracks are
+supported without a duration cap.
 
 ## CLI and Python
 
-Add `--correct_octave_errors` to an existing `tools/infer_cli.py` command. It also
-works with `--guide_path` and `--compare`; comparison runs all use the same octave
-correction setting.
-
-Python callers can pass `correct_octave_errors=True` to `VC.vc_single` or
-`VC.vc_multi`. Existing positional arguments remain in place. The Web UI APIs
-append the checkbox after their existing inputs.
+The existing `--correct_octave_errors` flag and `correct_octave_errors=True`
+Python argument remain unchanged. CLI `--compare` applies the chosen correction
+setting to every comparison variant. Existing API argument positions remain
+unchanged. The old `correct_brief_octave_jumps` helper remains as a compatibility
+alias to the new continuity behavior, without waveform evidence.
 
 ## Verification
 
 Run `~/.venv/bin/python -m unittest discover -s tests -v` in this checkout.
-Coverage includes doubled/halved pitch with vibrato, adjacent bursts, sustained
-octaves, slides, non-octave notes, breaths, phrase boundaries, disabled behavior,
-manual F0 priority, and interaction with transposition and pitch range.
+Tests cover changing notes, descending phrase endings, sustained errors,
+vibrato, ordinary melodic intervals, slides, short and long gaps, waveform
+evidence, transposition, external F0 priority, and the disabled path. Guide
+Vocals regression tests remain part of the suite.

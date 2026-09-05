@@ -47,9 +47,11 @@ unvoiced consonants. A conservative energy gate suppresses guidance in silence.
 
 When **Correct octave / overtone errors** is enabled, RMVPE reads the aligned
 guide only to choose between adjacent octaves of the selected extractor's result
-and to shape missing-F0 bridges. The source's tuning and ordinary intervals stay
-intact. The guide's prevailing octave is normalized automatically, and its
-start/end region limits pitch guidance as well as pronunciation guidance.
+and to shape missing-F0 bridges. It can absorb a brief unstable detector recovery
+into the bridge when the source settles again within 80 ms. The source's tuning
+and ordinary intervals stay intact. The guide's prevailing octave is normalized
+automatically, and its start/end region limits pitch guidance as well as
+pronunciation guidance.
 
 ## Timing and selective correction
 

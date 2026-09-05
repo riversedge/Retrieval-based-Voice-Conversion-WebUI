@@ -258,16 +258,18 @@ class Pipeline(object):
             )
             changed = correction_report.corrected_frames
             logger.info(
-                "Pitch correction: %d guide-register, %d bridge, "
+                "Pitch correction: %d guide-register, %d bridge, %d stabilized, "
                 "%d octave-corrected frames",
                 correction_report.guide_register_frames,
                 correction_report.bridged_frames,
+                correction_report.stabilized_frames,
                 correction_report.octave_corrected_frames,
             )
             if pitch_report is not None:
                 pitch_report.update(
                     guide_register_frames=correction_report.guide_register_frames,
                     bridged_frames=correction_report.bridged_frames,
+                    stabilized_frames=correction_report.stabilized_frames,
                     octave_corrected_frames=correction_report.octave_corrected_frames,
                     corrected_frames=changed,
                     corrected_seconds=changed * self.window / self.sr,

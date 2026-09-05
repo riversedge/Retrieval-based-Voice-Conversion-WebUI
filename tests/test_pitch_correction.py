@@ -241,7 +241,7 @@ class PitchPipelineTests(unittest.TestCase):
         np.testing.assert_array_equal(curve[100:201], np.full(101, 330.0))
 
     def test_reflected_padding_is_excluded_from_pitch_and_audio(self):
-        report = PitchCorrectionReport(0, 0, 0, 0)
+        report = PitchCorrectionReport(0, 0, 0, 0, 0)
         with patch("infer.modules.vc.pipeline.correct_pitch_estimates",
                    side_effect=lambda f, *a, **kw: (f.copy(), report)) as correction:
             self.pitch(True)
@@ -252,7 +252,7 @@ class PitchPipelineTests(unittest.TestCase):
         self.assertIsNone(kwargs['guide'])
 
     def test_aligned_guide_pitch_reaches_the_correction(self):
-        report = PitchCorrectionReport(0, 0, 0, 0)
+        report = PitchCorrectionReport(0, 0, 0, 0, 0)
         guide = np.full(250, 220.0, dtype=np.float32)
         with patch("infer.modules.vc.pipeline.correct_pitch_estimates",
                    side_effect=lambda f, *a, **kw: (f.copy(), report)) as correction:

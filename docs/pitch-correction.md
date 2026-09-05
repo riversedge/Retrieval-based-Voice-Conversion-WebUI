@@ -18,6 +18,12 @@ source frame, the correction considers the source estimate, half that frequency,
 and twice that frequency. It changes the source only when an adjacent octave is
 more than six semitones closer to the guide's register.
 
+After a detector dropout of at least 20 ms, the first recovered estimates may be
+unstable. The correction can extend the bridge by up to 80 ms when those estimates
+start at least 4.5 semitones from the guide and then settle within three semitones.
+This is limited to detector recovery; an uninterrupted flat or off-key source note
+is retained.
+
 This does not copy the guide singer's note tuning, vibrato, or arbitrary melodic
 intervals. A slightly flat source note remains slightly flat. The guide only
 chooses an octave for source estimates. During a detector dropout, the guide can

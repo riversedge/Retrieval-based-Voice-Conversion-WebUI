@@ -851,8 +851,9 @@ def convert_guided_with_octave_option(
 OCTAVE_CORRECTION_HELP = (
     "Keep the selected pitch extractor and bridge its missing estimates inside "
     "audible phrases. With Guide Vocals, the aligned guide chooses only the "
-    "octave register and supplies relative movement through gaps; source tuning "
-    "and other intervals remain intact. Without a guide, phrase continuity is "
+    "octave register, supplies relative movement through gaps, and stabilizes "
+    "brief detector recovery errors; source tuning and other intervals remain "
+    "intact. Without a guide, phrase continuity is "
     "used. Real silence remains unvoiced. Supplied F0 curves are left unchanged."
 )
 

@@ -60,6 +60,19 @@ class PitchGuidanceTests(unittest.TestCase):
         self.assertGreater(fixed[51], fixed[40])
         self.assertEqual(report.bridged_frames, 12)
 
+    def test_guide_stabilizes_brief_detector_recovery_after_gap(self):
+        primary = np.r_[
+            np.full(30, 220.), np.zeros(5),
+            [150., 155., 180., 200.], np.full(30, 220.),
+        ]
+        guide = np.full(len(primary), 220.)
+        fixed, report = correct_pitch_estimates(
+            primary, audio=self.waveform(guide), guide=guide
+        )
+        np.testing.assert_allclose(fixed, guide)
+        self.assertEqual(report.bridged_frames, 5)
+        self.assertEqual(report.stabilized_frames, 4)
+
     def test_unbounded_audible_dropout_holds_nearest_source_pitch(self):
         primary = np.r_[np.full(40, 220.), np.zeros(20)]
         fixed, report = correct_pitch_estimates(

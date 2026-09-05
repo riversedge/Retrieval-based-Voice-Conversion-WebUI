@@ -11,6 +11,7 @@ from infer.modules.vc.pitch_correction import _periodicity
 class PitchCorrectionReport:
     guide_register_frames: int
     bridged_frames: int
+    stabilized_frames: int
     octave_corrected_frames: int
     corrected_frames: int
 
@@ -264,6 +265,62 @@ def _log_bridge(left, right, count):
     return 2 ** np.linspace(np.log2(left), np.log2(right), count + 2)[1:-1]
 
 
+def _stabilize_detector_recovery(
+    f0, primary_valid, silence, guide, frame_seconds,
+    max_recovery_seconds=.08, stable_seconds=.03,
+):
+    """Fold a brief, unstable detector reacquisition into the preceding gap.
+
+    A recovery is considered unreliable only when it starts far from the guide,
+    then settles close to it within a small window. The guide identifies the
+    recovery point; it does not supply the replacement tuning.
+    """
+    result = f0.copy()
+    stabilized = np.zeros(len(result), dtype=bool)
+    missing = ~primary_valid & ~silence
+    gaps = np.flatnonzero(np.diff(np.r_[False, missing, False])).reshape(-1, 2)
+    minimum_gap = max(2, int(round(.02 / frame_seconds)))
+    maximum = max(1, int(round(max_recovery_seconds / frame_seconds)))
+    stable_count = max(3, int(round(stable_seconds / frame_seconds)))
+    maximum_step = .75 * frame_seconds / .01
+
+    for gap_start, recovery_start in gaps:
+        if recovery_start - gap_start < minimum_gap or recovery_start >= len(result):
+            continue
+        contiguous_stop = recovery_start
+        read_stop = min(len(result), recovery_start + maximum + stable_count)
+        while (contiguous_stop < read_stop and result[contiguous_stop] > 0
+               and not silence[contiguous_stop]):
+            contiguous_stop += 1
+        if contiguous_stop - recovery_start < stable_count + 1:
+            continue
+        last_anchor = min(
+            recovery_start + maximum,
+            contiguous_stop - stable_count,
+        )
+        for anchor in range(recovery_start, last_anchor + 1):
+            source_window = result[anchor:anchor + stable_count]
+            guide_window = guide[anchor:anchor + stable_count]
+            if np.any(guide_window <= 0):
+                continue
+            movement = abs(12 * np.diff(np.log2(source_window)))
+            if np.any(movement > maximum_step):
+                continue
+            if np.any(guide[recovery_start:anchor + stable_count] <= 0):
+                break
+            initial_error = abs(12 * np.log2(
+                result[recovery_start] / guide[recovery_start]
+            ))
+            settled_error = np.median(abs(12 * np.log2(source_window / guide_window)))
+            if (anchor > recovery_start and initial_error >= 4.5
+                    and settled_error <= 3
+                    and initial_error - settled_error >= 3):
+                result[recovery_start:anchor] = 0
+                stabilized[recovery_start:anchor] = True
+            break
+    return result, stabilized
+
+
 def _bridge_unpitched(f0, eligible, guide=None):
     """Bridge detector dropouts, following guide movement when it is available.
 
@@ -338,16 +395,20 @@ def correct_pitch_estimates(
     base[~primary_valid | silence] = 0
     guide_register = None
     guide_changed = np.zeros(len(base), dtype=bool)
+    stabilized = np.zeros(len(base), dtype=bool)
     if guide is not None:
         guide_register = _smooth_voiced_runs(_normalize_guide_register(primary, guide))
         corrected, guide_changed = _choose_guide_register(base, guide_register, silence)
+        corrected, stabilized = _stabilize_detector_recovery(
+            corrected, primary_valid, silence, guide_register, frame_seconds,
+        )
     else:
         corrected = correct_phrase_octaves(
             base, frame_seconds, audio=audio, sample_rate=sample_rate, silence=silence,
         )
 
     corrected, bridged = _bridge_unpitched(
-        corrected, ~primary_valid & ~silence, guide=guide_register,
+        corrected, (~primary_valid | stabilized) & ~silence, guide=guide_register,
     )
     corrected[silence] = 0
     comparable = primary_valid & (corrected > 0)
@@ -358,7 +419,8 @@ def correct_pitch_estimates(
                | (comparable & ~np.isclose(primary, corrected, rtol=1e-5, atol=1e-4)))
     report = PitchCorrectionReport(
         guide_register_frames=int(np.count_nonzero(guide_changed)),
-        bridged_frames=int(np.count_nonzero(bridged)),
+        bridged_frames=int(np.count_nonzero(bridged & ~primary_valid)),
+        stabilized_frames=int(np.count_nonzero(bridged & stabilized)),
         octave_corrected_frames=int(np.count_nonzero(octave_changed)),
         corrected_frames=int(np.count_nonzero(changed)),
     )

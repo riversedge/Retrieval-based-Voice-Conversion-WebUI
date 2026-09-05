@@ -263,13 +263,15 @@ class VC:
                 else:
                     pitch_info = (
                         "\nPitch correction: %d frames (%.3fs) adjusted; "
-                        "%d octave-corrected (%d using guide register), %d bridged."
+                        "%d octave-corrected (%d using guide register), %d bridged, "
+                        "%d detector-recovery frames stabilized."
                     ) % (
                         pitch_report.get("corrected_frames", 0),
                         pitch_report.get("corrected_seconds", 0.0),
                         pitch_report.get("octave_corrected_frames", 0),
                         pitch_report.get("guide_register_frames", 0),
                         pitch_report.get("bridged_frames", 0),
+                        pitch_report.get("stabilized_frames", 0),
                     )
             return (
                 "Success.\n%s\nTime:\nnpy: %.2fs, f0: %.2fs, infer: %.2fs."

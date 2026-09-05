@@ -1,4 +1,4 @@
-"""Fuse a primary pitch detector with FCPE and phrase octave continuity."""
+"""Correct octave-register errors while preserving the selected F0 detector."""
 
 from dataclasses import dataclass
 
@@ -8,9 +8,8 @@ from infer.modules.vc.pitch_correction import _periodicity
 
 
 @dataclass(frozen=True)
-class PitchFusionReport:
-    agreement_frames: int
-    fcpe_recovered_frames: int
+class PitchCorrectionReport:
+    guide_register_frames: int
     bridged_frames: int
     octave_corrected_frames: int
     corrected_frames: int
@@ -46,14 +45,6 @@ def _source_silence(audio, sample_rate, count, frame_seconds):
         if stop - start >= minimum:
             silence[start:stop] = True
     return silence
-
-
-def _same_pitch(primary, secondary, tolerance=.75):
-    both = (np.isfinite(primary) & (primary > 0)
-            & np.isfinite(secondary) & (secondary > 0))
-    agreement = np.zeros(len(primary), dtype=bool)
-    agreement[both] = abs(12 * np.log2(primary[both] / secondary[both])) <= tolerance
-    return agreement
 
 
 def _octave_preference(base, secondary, index):
@@ -219,27 +210,123 @@ def correct_phrase_octaves(
     return result
 
 
-def _bridge_unpitched(f0, eligible):
+def _normalize_guide_register(primary, guide):
+    """Remove only the guide's prevailing whole-octave offset from the source."""
+    valid = (np.isfinite(primary) & (primary > 0)
+             & np.isfinite(guide) & (guide > 0))
+    if np.count_nonzero(valid) < 10:
+        return np.zeros_like(guide, dtype=np.result_type(guide.dtype, np.float32))
+    difference = 12 * np.log2(guide[valid] / primary[valid])
+    octave_offset = 12 * np.rint(np.median(difference) / 12)
+    result = guide.astype(np.result_type(guide.dtype, np.float32), copy=True)
+    result *= 2 ** (-octave_offset / 12)
+    return result
+
+
+def _smooth_voiced_runs(f0, width=31):
+    """Estimate guide register without spreading pitch through guide silence."""
     result = f0.copy()
-    edges = np.flatnonzero(np.diff(np.r_[False, eligible, False])).reshape(-1, 2)
-    bridged = np.zeros(len(result), dtype=bool)
-    for start, stop in edges:
-        if (start == 0 or stop == len(result)
-                or result[start - 1] <= 0 or result[stop] <= 0):
+    voiced = np.isfinite(result) & (result > 0)
+    runs = np.flatnonzero(np.diff(np.r_[False, voiced, False])).reshape(-1, 2)
+    for start, stop in runs:
+        if stop - start < 3:
             continue
-        left = np.log2(result[start - 1])
-        right = np.log2(result[stop])
-        result[start:stop] = 2. ** np.linspace(left, right, stop - start + 2)[1:-1]
+        local_width = min(width, stop - start if (stop - start) % 2 else stop - start - 1)
+        radius = local_width // 2
+        padded = np.pad(np.log2(result[start:stop]), radius, mode="edge")
+        windows = np.lib.stride_tricks.sliding_window_view(padded, local_width)
+        result[start:stop] = 2 ** np.median(windows, axis=1)
+    return result
+
+
+def _choose_guide_register(primary, guide, silence):
+    """Use guide pitch only to choose among the source pitch and adjacent octaves."""
+    result = primary.astype(np.result_type(primary.dtype, np.float32), copy=True)
+    valid = (np.isfinite(primary) & (primary > 0)
+             & np.isfinite(guide) & (guide > 0) & ~silence)
+    indices = np.flatnonzero(valid)
+    if not len(indices):
+        return result, np.zeros(len(result), dtype=bool)
+    shifts = np.arange(-1, 2)
+    candidates = primary[indices, None] * 2. ** shifts
+    distances = abs(12 * np.log2(candidates / guide[indices, None]))
+    distances[(candidates < 50) | (candidates > 1100)] = np.inf
+    best = np.argmin(distances + .5 * abs(shifts), axis=1)
+    improvement = distances[:, 1] - distances[np.arange(len(indices)), best]
+    selected = improvement > 6
+    changed = np.zeros(len(result), dtype=bool)
+    changed[indices[selected]] = True
+    result[indices[selected]] = candidates[np.arange(len(indices))[selected], best[selected]]
+    return result, changed
+
+
+def _log_bridge(left, right, count):
+    return 2 ** np.linspace(np.log2(left), np.log2(right), count + 2)[1:-1]
+
+
+def _bridge_unpitched(f0, eligible, guide=None):
+    """Bridge detector dropouts, following guide movement when it is available.
+
+    The guide contributes relative contour only. A changing offset makes the
+    bridge meet the source-derived F0 on both sides, so guide tuning is never
+    copied into the converted vocal.
+    """
+    result = f0.copy()
+    bridged = np.zeros(len(result), dtype=bool)
+    edges = np.flatnonzero(np.diff(np.r_[False, eligible, False])).reshape(-1, 2)
+    if guide is not None:
+        guide_valid = np.isfinite(guide) & (guide > 0)
+        guide_notes = np.full(len(guide), np.nan)
+        guide_notes[guide_valid] = 12 * np.log2(guide[guide_valid])
+
+    for start, stop in edges:
+        left = result[start - 1] if start and result[start - 1] > 0 else 0
+        right = result[stop] if stop < len(result) and result[stop] > 0 else 0
+        count = stop - start
+        used_guide = False
+        if guide is not None and left > 0 and right > 0:
+            local_positions = np.arange(start - 1, stop + 1)
+            local_valid = guide_valid[start - 1:stop + 1]
+            if local_valid[0] and local_valid[-1] and np.mean(local_valid) >= .8:
+                local_guide = np.interp(
+                    local_positions,
+                    local_positions[local_valid],
+                    guide_notes[start - 1:stop + 1][local_valid],
+                )
+                source_anchors = np.array([12 * np.log2(left), 12 * np.log2(right)])
+                residual = np.linspace(
+                    source_anchors[0] - local_guide[0],
+                    source_anchors[1] - local_guide[-1],
+                    count + 2,
+                )
+                result[start:stop] = 2 ** ((local_guide[1:-1] + residual[1:-1]) / 12)
+                used_guide = True
+        if not used_guide and left > 0 and right > 0:
+            result[start:stop] = _log_bridge(left, right, count)
+        elif not used_guide and left > 0 and stop == len(result):
+            result[start:stop] = left
+        elif not used_guide and right > 0 and start == 0:
+            result[start:stop] = right
+        elif not used_guide:
+            continue
         bridged[start:stop] = True
     return result, bridged
 
 
-def fuse_pitch_estimates(primary, fcpe, frame_seconds=.01, *, audio=None, sample_rate=16000):
-    """Apply RMVPE/FCPE consensus, recovery, phrase rules, and gap bridging."""
+def correct_pitch_estimates(
+    primary,
+    frame_seconds=.01,
+    *,
+    audio=None,
+    sample_rate=16000,
+    guide=None,
+):
+    """Correct octave register and bridge gaps without replacing the detector."""
     primary = _validate_curve(primary, "Primary")
-    fcpe = _validate_curve(fcpe, "FCPE")
-    if len(primary) != len(fcpe):
-        raise ValueError("Primary and FCPE pitch curves must have equal lengths.")
+    if guide is not None:
+        guide = _validate_curve(guide, "Guide")
+        if len(primary) != len(guide):
+            raise ValueError("Primary and guide pitch curves must have equal lengths.")
     if audio is not None:
         audio = np.asarray(audio)
         if audio.ndim != 1 or not np.all(np.isfinite(audio)):
@@ -247,30 +334,30 @@ def fuse_pitch_estimates(primary, fcpe, frame_seconds=.01, *, audio=None, sample
 
     silence = _source_silence(audio, sample_rate, len(primary), frame_seconds)
     primary_valid = np.isfinite(primary) & (primary > 0)
-    fcpe_valid = np.isfinite(fcpe) & (fcpe > 0)
-    agreement = _same_pitch(primary, fcpe) & ~silence
-    recovered = ~primary_valid & fcpe_valid & ~silence
     base = primary.astype(np.result_type(primary.dtype, np.float32), copy=True)
-    base[recovered] = fcpe[recovered]
-    base[silence] = 0
+    base[~primary_valid | silence] = 0
+    guide_register = None
+    guide_changed = np.zeros(len(base), dtype=bool)
+    if guide is not None:
+        guide_register = _smooth_voiced_runs(_normalize_guide_register(primary, guide))
+        corrected, guide_changed = _choose_guide_register(base, guide_register, silence)
+    else:
+        corrected = correct_phrase_octaves(
+            base, frame_seconds, audio=audio, sample_rate=sample_rate, silence=silence,
+        )
 
-    corrected = correct_phrase_octaves(
-        base, frame_seconds, audio=audio, sample_rate=sample_rate,
-        alternate=fcpe, locked=agreement, silence=silence,
+    corrected, bridged = _bridge_unpitched(
+        corrected, ~primary_valid & ~silence, guide=guide_register,
     )
-    both_missing = ~primary_valid & ~fcpe_valid & ~silence
-    corrected, bridged = _bridge_unpitched(corrected, both_missing)
     corrected[silence] = 0
-
     comparable = primary_valid & (corrected > 0)
     octave_changed = np.zeros(len(primary), dtype=bool)
     octave_changed[comparable] = abs(12 * np.log2(
         corrected[comparable] / primary[comparable])) > 6
     changed = ((primary_valid != (corrected > 0))
                | (comparable & ~np.isclose(primary, corrected, rtol=1e-5, atol=1e-4)))
-    report = PitchFusionReport(
-        agreement_frames=int(np.count_nonzero(agreement)),
-        fcpe_recovered_frames=int(np.count_nonzero(recovered & (corrected > 0))),
+    report = PitchCorrectionReport(
+        guide_register_frames=int(np.count_nonzero(guide_changed)),
         bridged_frames=int(np.count_nonzero(bridged)),
         octave_corrected_frames=int(np.count_nonzero(octave_changed)),
         corrected_frames=int(np.count_nonzero(changed)),

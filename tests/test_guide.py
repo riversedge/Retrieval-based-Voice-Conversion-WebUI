@@ -61,6 +61,14 @@ class GuideAlignmentTests(unittest.TestCase):
         np.testing.assert_allclose(features[:, 0], np.arange(10) + 0.5)
         np.testing.assert_allclose(weights, 1)
 
+    def test_pitch_alignment_preserves_guide_unvoiced_regions(self):
+        aligned = AlignedGuide(
+            np.ones((3, 2), dtype=np.float32), np.ones(3), "content",
+            np.arange(3, dtype=np.float32),
+        )
+        result = aligned.align_pitch(np.array([100, 0, 200, 210, 0.]), 5)
+        np.testing.assert_array_equal(result, np.array([100, 0, 200, 210, 0.]))
+
 
 class FakeEncoder:
     def extract_features(self, source, padding_mask, output_layer):

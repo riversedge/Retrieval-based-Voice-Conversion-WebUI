@@ -19,7 +19,7 @@ import torch.nn.functional as F
 import torchcrepe
 from scipy import signal
 from infer.modules.vc.guide import FEATURE_HOP, align_guide, guide_summary
-from infer.modules.vc.pitch_fusion import fuse_pitch_estimates
+from infer.modules.vc.pitch_guidance import correct_pitch_estimates
 
 now_dir = os.getcwd()
 sys.path.append(now_dir)
@@ -154,74 +154,17 @@ class Pipeline(object):
         self.t_max = self.sr * self.x_max  # 免查询时长阈值
         self.device = config.device
 
-    def _fcpe_device(self):
-        device = str(self.device)
-        if "privateuseone" in device:
-            return "cpu"
-        if device.startswith("cuda") and not torch.cuda.is_available():
-            return "cpu"
-        if device.startswith("mps") and not torch.backends.mps.is_available():
-            return "cpu"
-        return device
+    def _load_rmvpe(self):
+        if not hasattr(self, "model_rmvpe"):
+            from infer.lib.rmvpe import RMVPE
 
-    def _load_fcpe(self, device):
-        if not hasattr(self, "model_fcpe") or self.model_fcpe_device != device:
-            from torchfcpe import spawn_bundled_infer_model
-
-            logger.info("Loading FCPE pitch model on %s", device)
-            self.model_fcpe = spawn_bundled_infer_model(device)
-            self.model_fcpe_device = device
-        return self.model_fcpe
-
-    def _infer_fcpe(self, audio, target_length, *, device=None):
-        """Extract FCPE over a full track using bounded overlapping chunks."""
-        if target_length <= 0:
-            return np.zeros(0, dtype=np.float32)
-        device = self._fcpe_device() if device is None else device
-        try:
-            model = self._load_fcpe(device)
-            result = np.zeros(target_length, dtype=np.float32)
-            chunk_frames = 2000
-            context_frames = 100
-            for start in range(0, target_length, chunk_frames):
-                stop = min(start + chunk_frames, target_length)
-                read_start = max(0, start - context_frames)
-                read_stop = min(target_length, stop + context_frames)
-                sample_start = read_start * self.window
-                sample_stop = min(len(audio), read_stop * self.window)
-                segment = np.asarray(audio[sample_start:sample_stop], dtype=np.float32)
-                required = (read_stop - read_start) * self.window
-                if len(segment) < required:
-                    segment = np.pad(segment, (0, required - len(segment)))
-                tensor = torch.from_numpy(np.ascontiguousarray(segment))[None, :, None].to(device)
-                with torch.no_grad():
-                    local_f0, unvoiced = model.infer(
-                        tensor,
-                        sr=self.sr,
-                        decoder_mode="local_argmax",
-                        threshold=.006,
-                        f0_min=50,
-                        f0_max=1100,
-                        interp_uv=False,
-                        output_interp_target_length=read_stop - read_start,
-                        retur_uv=True,
-                    )
-                local_f0 = local_f0.squeeze().float().cpu().numpy().reshape(-1)
-                unvoiced = unvoiced.squeeze().float().cpu().numpy().reshape(-1)
-                local_f0[(unvoiced >= .5) | ~np.isfinite(local_f0)] = 0
-                first = start - read_start
-                result[start:stop] = local_f0[first:first + stop - start]
-                logger.info("FCPE pitch extraction: %.1f / %.1f seconds",
-                            stop * self.window / self.sr,
-                            target_length * self.window / self.sr)
-            return result
-        except Exception:
-            if device != "cpu":
-                logger.warning("FCPE failed on %s; retrying on CPU", device, exc_info=True)
-                if hasattr(self, "model_fcpe"):
-                    del self.model_fcpe
-                return self._infer_fcpe(audio, target_length, device="cpu")
-            raise
+            logger.info("Loading rmvpe model,%s", "%s/rmvpe.pt" % os.environ["rmvpe_root"])
+            self.model_rmvpe = RMVPE(
+                "%s/rmvpe.pt" % os.environ["rmvpe_root"],
+                is_half=self.is_half,
+                device=self.device,
+            )
+        return self.model_rmvpe
 
     def get_f0(
         self,
@@ -235,6 +178,7 @@ class Pipeline(object):
         inp_f0=None,
         correct_octave_errors=False,
         pitch_report=None,
+        guide_f0=None,
     ):
         global input_audio_path2wav
         time_step = self.window / self.sr * 1000
@@ -285,18 +229,7 @@ class Pipeline(object):
             f0[pd < 0.1] = 0
             f0 = f0[0].cpu().numpy()
         elif f0_method == "rmvpe":
-            if not hasattr(self, "model_rmvpe"):
-                from infer.lib.rmvpe import RMVPE
-
-                logger.info(
-                    "Loading rmvpe model,%s" % "%s/rmvpe.pt" % os.environ["rmvpe_root"]
-                )
-                self.model_rmvpe = RMVPE(
-                    "%s/rmvpe.pt" % os.environ["rmvpe_root"],
-                    is_half=self.is_half,
-                    device=self.device,
-                )
-            f0 = self.model_rmvpe.infer_from_audio(x, thred=0.03)
+            f0 = self._load_rmvpe().infer_from_audio(x, thred=0.03)
 
             if "privateuseone" in str(self.device):  # clean ortruntime memory
                 del self.model_rmvpe.model
@@ -309,28 +242,33 @@ class Pipeline(object):
             pad_frames = self.t_pad // self.window
             stop = max(pad_frames, len(f0) - pad_frames)
             source_audio = x[self.t_pad:len(x) - self.t_pad] if self.t_pad else x
-            fcpe = self._infer_fcpe(source_audio, stop - pad_frames)
+            source_count = stop - pad_frames
+            if guide_f0 is not None:
+                guide_f0 = np.asarray(guide_f0, dtype=np.float32)
+                if len(guide_f0) < source_count:
+                    guide_f0 = np.pad(guide_f0, (0, source_count - len(guide_f0)))
+                else:
+                    guide_f0 = guide_f0[:source_count]
             corrected = f0.copy()
-            corrected[pad_frames:stop], fusion_report = fuse_pitch_estimates(
-                f0[pad_frames:stop], fcpe, self.window / self.sr,
+            corrected[pad_frames:stop], correction_report = correct_pitch_estimates(
+                f0[pad_frames:stop], self.window / self.sr,
                 audio=source_audio,
                 sample_rate=self.sr,
+                guide=guide_f0,
             )
-            changed = fusion_report.corrected_frames
+            changed = correction_report.corrected_frames
             logger.info(
-                "Pitch fusion: %d agreement, %d FCPE recovery, %d bridge, "
+                "Pitch correction: %d guide-register, %d bridge, "
                 "%d octave-corrected frames",
-                fusion_report.agreement_frames,
-                fusion_report.fcpe_recovered_frames,
-                fusion_report.bridged_frames,
-                fusion_report.octave_corrected_frames,
+                correction_report.guide_register_frames,
+                correction_report.bridged_frames,
+                correction_report.octave_corrected_frames,
             )
             if pitch_report is not None:
                 pitch_report.update(
-                    agreement_frames=fusion_report.agreement_frames,
-                    fcpe_recovered_frames=fusion_report.fcpe_recovered_frames,
-                    bridged_frames=fusion_report.bridged_frames,
-                    octave_corrected_frames=fusion_report.octave_corrected_frames,
+                    guide_register_frames=correction_report.guide_register_frames,
+                    bridged_frames=correction_report.bridged_frames,
+                    octave_corrected_frames=correction_report.octave_corrected_frames,
                     corrected_frames=changed,
                     corrected_seconds=changed * self.window / self.sr,
                 )
@@ -556,9 +494,11 @@ class Pipeline(object):
             index = big_npy = None
         audio = signal.filtfilt(bh, ah, audio)
         aligned_guide = None
-        if guide is not None and guide.strength > 0:
+        aligned_guide_f0 = None
+        if guide is not None and (guide.strength > 0 or correct_octave_errors):
             guide.validate(audio)
-            if guide.mode == "retrieval" and (index is None or index_rate == 0 or index.ntotal == 0):
+            if (guide.strength > 0 and guide.mode == "retrieval"
+                    and (index is None or index_rate == 0 or index.ntotal == 0)):
                 raise ValueError("Retrieval guidance needs a valid, nonempty index and index rate > 0.")
             t_guide = ttime()
             logger.info("Extracting original track content for guide alignment")
@@ -568,6 +508,23 @@ class Pipeline(object):
             guide_features = self.track_content(model, guide_audio, version)
             logger.info("Aligning guide to original track")
             aligned_guide = align_guide(source_features, guide_features, audio, guide)
+            if correct_octave_errors:
+                logger.info("Extracting guide register with RMVPE")
+                guide_f0 = self._load_rmvpe().infer_from_audio(
+                    np.ascontiguousarray(guide_audio, dtype=np.float32), thred=0.03
+                )
+                aligned_guide_f0 = aligned_guide.align_pitch(
+                    guide_f0, len(audio) // self.window, self.window / self.sr
+                )
+                guide_times = np.arange(len(aligned_guide_f0)) * self.window / self.sr
+                guide_end = guide.end or len(audio) / self.sr
+                aligned_guide_f0[
+                    (guide_times < guide.start) | (guide_times >= guide_end)
+                ] = 0
+                if f0_method != "rmvpe" and "privateuseone" in str(self.device):
+                    del self.model_rmvpe.model
+                    del self.model_rmvpe
+                    logger.info("Cleaning ortruntime memory")
             del source_features, guide_features
             times[0] += ttime() - t_guide
             logger.info(guide_summary(guide.report))
@@ -621,6 +578,7 @@ class Pipeline(object):
                 inp_f0,
                 correct_octave_errors=correct_octave_errors,
                 pitch_report=pitch_report,
+                guide_f0=aligned_guide_f0,
             )
             pitch = pitch[:p_len]
             pitchf = pitchf[:p_len]

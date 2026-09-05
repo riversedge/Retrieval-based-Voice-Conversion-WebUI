@@ -2,12 +2,12 @@ import unittest
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import numpy as np
 
 from infer.modules.vc.pitch_correction import correct_octave_jumps, _periodicity, _supported_path
-from infer.modules.vc.pitch_fusion import PitchFusionReport
+from infer.modules.vc.pitch_guidance import PitchCorrectionReport
 from infer.modules.vc.pipeline import Pipeline
 
 
@@ -203,11 +203,8 @@ class PitchPipelineTests(unittest.TestCase):
         self.raw = np.full(450, 220.0, dtype=np.float32)
         self.raw[180:215] = 440
         self.pipeline.model_rmvpe = SimpleNamespace(infer_from_audio=lambda *a, **kw: self.raw.copy())
-        self.pipeline._infer_fcpe = Mock(
-            return_value=np.full(250, 220.0, dtype=np.float32)
-        )
 
-    def pitch(self, enabled=False, shift=0, f0_range=None, override=None):
+    def pitch(self, enabled=False, shift=0, f0_range=None, override=None, guide_f0=None):
         report = {}
         # Waveform evidence must agree with the known synthetic fundamental.
         time = np.arange(450 * 160) / 16000
@@ -216,6 +213,7 @@ class PitchPipelineTests(unittest.TestCase):
             "fixture", audio, 450,
             shift, "rmvpe", 3, f0_range, override,
             correct_octave_errors=enabled, pitch_report=report,
+            guide_f0=guide_f0,
         )
         return continuous, report
 
@@ -236,25 +234,30 @@ class PitchPipelineTests(unittest.TestCase):
 
     def test_external_curve_is_authoritative(self):
         supplied = np.array([[0, 330], [1, 330]], dtype=np.float32)
-        with patch("infer.modules.vc.pipeline.fuse_pitch_estimates") as correction:
+        with patch("infer.modules.vc.pipeline.correct_pitch_estimates") as correction:
             curve, report = self.pitch(True, override=supplied)
         correction.assert_not_called()
-        self.pipeline._infer_fcpe.assert_not_called()
         self.assertEqual(report["skipped"], "supplied F0 curve")
         np.testing.assert_array_equal(curve[100:201], np.full(101, 330.0))
 
     def test_reflected_padding_is_excluded_from_pitch_and_audio(self):
-        report = PitchFusionReport(0, 0, 0, 0, 0)
-        with patch("infer.modules.vc.pipeline.fuse_pitch_estimates",
+        report = PitchCorrectionReport(0, 0, 0, 0)
+        with patch("infer.modules.vc.pipeline.correct_pitch_estimates",
                    side_effect=lambda f, *a, **kw: (f.copy(), report)) as correction:
             self.pitch(True)
         args, kwargs = correction.call_args
         np.testing.assert_array_equal(args[0], self.raw[100:-100])
         self.assertEqual(len(kwargs['audio']), 250 * 160)
         self.assertEqual(kwargs['sample_rate'], 16000)
-        fcpe_args = self.pipeline._infer_fcpe.call_args.args
-        self.assertEqual(len(fcpe_args[0]), 250 * 160)
-        self.assertEqual(fcpe_args[1], 250)
+        self.assertIsNone(kwargs['guide'])
+
+    def test_aligned_guide_pitch_reaches_the_correction(self):
+        report = PitchCorrectionReport(0, 0, 0, 0)
+        guide = np.full(250, 220.0, dtype=np.float32)
+        with patch("infer.modules.vc.pipeline.correct_pitch_estimates",
+                   side_effect=lambda f, *a, **kw: (f.copy(), report)) as correction:
+            self.pitch(True, guide_f0=guide)
+        np.testing.assert_array_equal(correction.call_args.kwargs["guide"], guide)
 
 
 if __name__ == "__main__":

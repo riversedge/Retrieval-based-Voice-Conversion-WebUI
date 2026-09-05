@@ -263,11 +263,12 @@ class VC:
                 else:
                     pitch_info = (
                         "\nPitch correction: %d frames (%.3fs) adjusted; "
-                        "%d recovered by FCPE, %d bridged."
+                        "%d octave-corrected (%d using guide register), %d bridged."
                     ) % (
                         pitch_report.get("corrected_frames", 0),
                         pitch_report.get("corrected_seconds", 0.0),
-                        pitch_report.get("fcpe_recovered_frames", 0),
+                        pitch_report.get("octave_corrected_frames", 0),
+                        pitch_report.get("guide_register_frames", 0),
                         pitch_report.get("bridged_frames", 0),
                     )
             return (

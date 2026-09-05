@@ -5,15 +5,17 @@ Available on `main`; originally developed on `guide-vocal-experiment`.
 For optional correction of the original's detected pitch, see
 [Correct brief octave jumps](pitch-correction.md).
 
-Use a second take to influence pronunciation while the original supplies pitch
-and the selected RVC model supplies the output voice. No retraining or new model
-downloads are required when the normal RVC models are installed. Full-length
-tracks are supported; there is no 30-second limit.
+Use a second take to influence pronunciation while the original supplies the
+performance and the selected RVC model supplies the output voice. With octave
+correction enabled, the guide can also identify the source's intended register
+without copying its exact tuning. No retraining or new model downloads are
+required when the normal RVC models are installed. Full-length tracks are
+supported; there is no 30-second limit.
 
 Pronunciation and accent transfer depend on the guide and the selected model.
 Content features also carry some delivery information. Strong guidance can change
 expression or create artifacts. Lyrics-driven correction and explicit transfer
-of the guide's pitch/vibrato are not implemented in this version.
+of the guide's exact pitch or vibrato are not implemented.
 
 ## Web UI
 
@@ -37,11 +39,17 @@ requires a usable index and an index rate greater than zero. Use the same index
 rate as the baseline; guidance strength and index rate are separate controls.
 Retrieval is the default in the Web UI, CLI, and Python API.
 
-The original F0 extraction, pitch shift/range or supplied F0 curve, output sample
+The selected F0 extractor, pitch shift/range or supplied F0 curve, output sample
 rate, and loudness-envelope settings continue to apply. A pitch-enabled model is
 required for guided conversion. Existing consonant/breath protection uses the
 original content and voicing; strong protection can therefore reduce changes to
 unvoiced consonants. A conservative energy gate suppresses guidance in silence.
+
+When **Correct octave / overtone errors** is enabled, RMVPE reads the aligned
+guide only to choose between adjacent octaves of the selected extractor's result
+and to shape missing-F0 bridges. The source's tuning and ordinary intervals stay
+intact. The guide's prevailing octave is normalized automatically, and its
+start/end region limits pitch guidance as well as pronunciation guidance.
 
 ## Timing and selective correction
 
@@ -113,8 +121,9 @@ problems; it never allocates a quadratic full-song matrix. Feature storage still
 grows with track length, and guided conversion takes longer than ordinary RVC.
 
 The aligned guide is sampled on each synthesis chunk's global timeline, including
-half-frame chunk starts and context padding. It never supplies the pitch track.
-Zero-distance index matches are handled without NaNs.
+half-frame chunk starts and context padding. Optional register correction uses
+the same timing map on the 10 ms pitch grid. Zero-distance index matches are
+handled without NaNs.
 
 Run regression tests with:
 

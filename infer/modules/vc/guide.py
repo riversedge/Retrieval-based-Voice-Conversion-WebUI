@@ -1,7 +1,7 @@
-"""Guide Vocals alignment in RVC's content-feature space.
+"""Align Guide Vocals for pronunciation and optional octave-register evidence.
 
-The guide supplies pronunciation features, never F0. No waveform mixing or
-pitch-shifting is involved. Alignment is an estimate, not a phoneme recognizer.
+No waveform mixing or guide tuning transfer is involved. Alignment is an
+estimate, not a phoneme recognizer.
 """
 
 from dataclasses import dataclass, field
@@ -222,7 +222,7 @@ def align_guide(source_features, guide_features, source_audio, guide):
         "guide_seconds_by_source_frame": (mapping * FEATURE_HOP / SAMPLE_RATE).round(4).tolist(),
     }
     guide.report.update(report)
-    return AlignedGuide(aligned, weights, guide.mode)
+    return AlignedGuide(aligned, weights, guide.mode, mapping)
 
 
 @dataclass
@@ -230,6 +230,39 @@ class AlignedGuide:
     features: np.ndarray
     weights: np.ndarray
     mode: str
+    mapping: np.ndarray = None
+
+    def align_pitch(self, guide_f0, frame_count, frame_seconds=0.01):
+        """Warp guide F0 onto the source grid without crossing unvoiced runs."""
+        guide_f0 = np.asarray(guide_f0)
+        if guide_f0.ndim != 1 or not np.isfinite(guide_f0).all():
+            raise ValueError("Guide pitch must be a finite one-dimensional F0 curve.")
+        if self.mapping is None:
+            raise ValueError("Guide alignment does not include a timing map.")
+        if frame_count < 0 or not np.isfinite(frame_seconds) or frame_seconds <= 0:
+            raise ValueError("Pitch frame count and duration must be valid.")
+        source_feature_positions = (
+            np.arange(frame_count) * frame_seconds * SAMPLE_RATE / FEATURE_HOP
+        )
+        guide_feature_positions = np.interp(
+            source_feature_positions,
+            np.arange(len(self.mapping)),
+            self.mapping,
+        )
+        guide_pitch_positions = (
+            guide_feature_positions * FEATURE_HOP / SAMPLE_RATE / frame_seconds
+        )
+        result = np.zeros(frame_count, dtype=np.result_type(guide_f0.dtype, np.float32))
+        voiced = guide_f0 > 0
+        runs = np.flatnonzero(np.diff(np.r_[False, voiced, False])).reshape(-1, 2)
+        for start, stop in runs:
+            use = ((guide_pitch_positions >= start)
+                   & (guide_pitch_positions <= stop - 1))
+            if np.any(use):
+                result[use] = np.interp(
+                    guide_pitch_positions[use], np.arange(start, stop), guide_f0[start:stop]
+                )
+        return result
 
     def for_chunk(self, start_sample, pad_samples, frame_count):
         # Chunks can begin on a 10 ms F0 boundary, halfway between content frames.

@@ -849,12 +849,11 @@ def convert_guided_with_octave_option(
 
 
 OCTAVE_CORRECTION_HELP = (
-    "Run FCPE alongside the selected pitch extractor. Matching pitches are "
-    "trusted; FCPE supplies missing estimates, and audible gaps can be "
-    "bridged from the surrounding phrase. Abrupt mid-phrase register changes "
-    "may be folded by one octave. Real silence remains unvoiced. Works with or "
-    "without a pitch range and may alter intentional large leaps. "
-    "Supplied F0 curves are left unchanged."
+    "Keep the selected pitch extractor and bridge its missing estimates inside "
+    "audible phrases. With Guide Vocals, the aligned guide chooses only the "
+    "octave register and supplies relative movement through gaps; source tuning "
+    "and other intervals remain intact. Without a guide, phrase continuity is "
+    "used. Real silence remains unvoiced. Supplied F0 curves are left unchanged."
 )
 
 
@@ -932,7 +931,7 @@ with gr.Blocks(title="RVC WebUI") as app:
                                 interactive=True,
                             )
                             correct_octaves0 = gr.Checkbox(
-                                label="Correct octave errors with FCPE cross-check",
+                                label="Correct octave / overtone errors",
                                 value=False, info=OCTAVE_CORRECTION_HELP,
                             )
 
@@ -1034,6 +1033,8 @@ with gr.Blocks(title="RVC WebUI") as app:
                     gr.Markdown(
                         "Use another take of the same lyrics to guide pronunciation. "
                         "The original supplies pitch; the selected RVC model supplies the voice. "
+                        "Octave correction can optionally use the guide's register while retaining "
+                        "the original tuning. "
                         "Full-length tracks are supported. Start with retrieval mode at 0.5, "
                         "then compare with the ordinary conversion above. "
                         "Use timing anchors if automatic alignment matches the wrong words."
@@ -1138,7 +1139,7 @@ with gr.Blocks(title="RVC WebUI") as app:
                             interactive=True,
                         )
                         correct_octaves1 = gr.Checkbox(
-                            label="Correct octave errors with FCPE cross-check",
+                            label="Correct octave / overtone errors",
                             value=False, info=OCTAVE_CORRECTION_HELP,
                         )
                         format1 = gr.Radio(
